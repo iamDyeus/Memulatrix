@@ -1,14 +1,13 @@
-# Ulatrix
+# Memulatrix
 Virtual Memory Simulator for educational purposes, built with C++ and Python.
 
 > [!IMPORTANT]  
-> UNDER DEVELOPMENT :
 We are currently working on the project. Please check back later for updates and better documentation.
 
-## Project Structure
+## Proposed Project Structure
 The project is organized into the following directories:
 ```
-Ulatrix/
+Memulatrix/
 │── docs/                      # Documentation (README, architecture diagrams, API docs)
 │── src/                       # Source code
 │   ├── cpp/                   # C++ core simulation
