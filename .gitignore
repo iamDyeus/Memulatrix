@@ -1,0 +1,39 @@
+# Compiled object files, shared libraries, executables
+*.o
+*.obj
+*.so
+*.dll
+*.exe
+
+# C++ build directories
+/build/
+/bin/
+/CMakeFiles/
+CMakeCache.txt
+Makefile
+
+# Python cache and environment
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Virtual environment
+venv/
+.env/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Logs and databases
+*.log
+db.sqlite3
+
+# IDE and editor specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace

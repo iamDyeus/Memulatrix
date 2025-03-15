@@ -1,0 +1,3 @@
+# ...existing code...
+
+# Documentation (README, architecture diagrams, API docs)
