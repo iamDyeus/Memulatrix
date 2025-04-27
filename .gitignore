@@ -37,3 +37,6 @@ db.sqlite3
 *.swo
 *.sublime-project
 *.sublime-workspace
+
+#vs files
+.vs/
