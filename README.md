@@ -1,6 +1,11 @@
 # Memulatrix
 Virtual Memory Simulator for educational purposes, built with C++ and Python.
 
+![image](https://github.com/user-attachments/assets/7fbccc8c-8262-4e11-be8e-b35b4d3bf632)
+![image](https://github.com/user-attachments/assets/a04b9f59-9654-4394-9fde-f0ac333c812b)
+
+
+
 > [!IMPORTANT]  
 We are currently working on the project. Please check back later for updates and better documentation.
 
