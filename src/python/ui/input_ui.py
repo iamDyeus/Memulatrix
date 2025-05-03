@@ -57,36 +57,46 @@ class VirtualMemoryUI:
         self.va_size_menu = ttk.Combobox(memory_settings_frame, textvariable=self.va_size_var, values=["16-bit"], width=15)
         self.va_size_menu.pack(pady=5)
 
+        # Set/Update Configuration Button
+        self.config_button = tk.Button(
+            memory_settings_frame,
+            text="Set Configuration",
+            bg="dodgerblue",
+            fg="white",
+            command=self.set_configuration
+        )
+        self.config_button.pack(pady=10)
+
         # Process Addition Frame
-        process_add_frame = tk.Frame(main_frame, bg="lightskyblue", padx=10, pady=10, relief="groove", borderwidth=2)
-        process_add_frame.grid(row=0, column=2, padx=5, pady=5, sticky="nsew")
-        tk.Label(process_add_frame, text="Add Process", font=("Helvetica", 11, "bold"), bg="lightskyblue", fg="darkslategray").pack(anchor="w")
+        self.process_add_frame = tk.Frame(main_frame, bg="lightskyblue", padx=10, pady=10, relief="groove", borderwidth=2)
+        self.process_add_frame.grid(row=0, column=2, padx=5, pady=5, sticky="nsew")
+        tk.Label(self.process_add_frame, text="Add Process", font=("Helvetica", 11, "bold"), bg="lightskyblue", fg="darkslategray").pack(anchor="w")
         
         # Process Name
-        tk.Label(process_add_frame, text="Name:", bg="lightskyblue").pack(anchor="w", pady=2)
-        self.process_name_entry = tk.Entry(process_add_frame, width=20, fg="gray")
+        tk.Label(self.process_add_frame, text="Name:", bg="lightskyblue").pack(anchor="w", pady=2)
+        self.process_name_entry = tk.Entry(self.process_add_frame, width=20, fg="gray")
         self.process_name_entry.insert(0, "e.g., Process1")
         self.process_name_entry.bind("<FocusIn>", lambda e: self.clear_placeholder(self.process_name_entry, "e.g., Process1"))
         self.process_name_entry.bind("<FocusOut>", lambda e: self.add_placeholder(self.process_name_entry, "e.g., Process1"))
         self.process_name_entry.pack(pady=5)
 
         # Process Size
-        tk.Label(process_add_frame, text="Size (GB):", bg="lightskyblue").pack(anchor="w", pady=2)
-        self.process_size_entry = tk.Entry(process_add_frame, width=20, fg="gray")
+        tk.Label(self.process_add_frame, text="Size (GB):", bg="lightskyblue").pack(anchor="w", pady=2)
+        self.process_size_entry = tk.Entry(self.process_add_frame, width=20, fg="gray")
         self.process_size_entry.insert(0, "e.g., 1")
         self.process_size_entry.bind("<FocusIn>", lambda e: self.clear_placeholder(self.process_size_entry, "e.g., 1"))
         self.process_size_entry.bind("<FocusOut>", lambda e: self.add_placeholder(self.process_size_entry, "e.g., 1"))
         self.process_size_entry.pack(pady=5)
 
         # Process Type
-        tk.Label(process_add_frame, text="Type:", bg="lightskyblue").pack(anchor="w", pady=2)
+        tk.Label(self.process_add_frame, text="Type:", bg="lightskyblue").pack(anchor="w", pady=2)
         self.process_type_var = tk.StringVar(value="User")
-        type_menu = ttk.Combobox(process_add_frame, textvariable=self.process_type_var, values=["User", "System"], width=17)
-        type_menu.pack(pady=5)
-        type_menu.bind("<<ComboboxSelected>>", self.toggle_system_dropdown)
+        self.process_type_menu = ttk.Combobox(self.process_add_frame, textvariable=self.process_type_var, values=["User", "System"], width=17)
+        self.process_type_menu.pack(pady=5)
+        self.process_type_menu.bind("<<ComboboxSelected>>", self.toggle_system_dropdown)
 
         # System Process Dropdown (hidden by default)
-        self.system_process_frame = tk.Frame(process_add_frame, bg="lightskyblue")
+        self.system_process_frame = tk.Frame(self.process_add_frame, bg="lightskyblue")
         tk.Label(self.system_process_frame, text="System Process:", bg="lightskyblue").pack(anchor="w", pady=2)
         self.system_process_var = tk.StringVar(value="kernel")
         system_processes = ["kernel", "scheduler", "memory_manager", "file_system", "network_stack"]
@@ -95,10 +105,15 @@ class VirtualMemoryUI:
 
         # Set Priority Checkbox
         self.set_priority_var = tk.BooleanVar()
-        tk.Checkbutton(process_add_frame, text="Set Priority?", variable=self.set_priority_var, bg="lightskyblue").pack(anchor="w", pady=5)
+        self.priority_checkbutton = tk.Checkbutton(self.process_add_frame, text="Set Priority?", variable=self.set_priority_var, bg="lightskyblue")
+        self.priority_checkbutton.pack(anchor="w", pady=5)
 
         # Add Process Button
-        tk.Button(process_add_frame, text="Add Process", bg="dodgerblue", fg="white", command=self.save_process).pack(pady=10)
+        self.add_process_button = tk.Button(self.process_add_frame, text="Add Process", bg="dodgerblue", fg="white", command=self.save_process)
+        self.add_process_button.pack(pady=10)
+
+        # Disable process addition section initially
+        self.disable_process_add_section()
 
         # Active Processes Frame
         active_processes_frame = tk.Frame(root, bg="lightcyan", padx=10, pady=10, relief="groove", borderwidth=2)
@@ -123,14 +138,120 @@ class VirtualMemoryUI:
         # Initial update
         self.update_options(None)
 
-        # Bind the window close event to delete processes.json
+        # Bind the window close event to delete JSON files
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def on_closing(self):
-        # Delete processes.json when the UI is closed
+        # Delete processes.json and environment_settings.json when the UI is closed
         if os.path.exists("processes.json"):
             os.remove("processes.json")
+        if os.path.exists("environment_settings.json"):
+            os.remove("environment_settings.json")
         self.root.destroy()
+
+    def disable_process_add_section(self):
+        self.process_name_entry.config(state="disabled")
+        self.process_size_entry.config(state="disabled")
+        self.process_type_var.set("User")  # Reset to default
+        self.process_type_menu.config(state="disabled")
+        self.system_process_menu.config(state="disabled")
+        self.set_priority_var.set(False)
+        self.priority_checkbutton.config(state="disabled")
+        self.add_process_button.config(state="disabled")
+
+    def enable_process_add_section(self):
+        self.process_name_entry.config(state="normal")
+        self.process_size_entry.config(state="normal")
+        self.process_type_menu.config(state="readonly")
+        if self.process_type_var.get() == "System":
+            self.system_process_menu.config(state="readonly")
+        else:
+            self.system_process_menu.config(state="disabled")
+        self.priority_checkbutton.config(state="normal")
+        self.add_process_button.config(state="normal")
+        # Ensure placeholder text is visible if fields are empty
+        self.add_placeholder(self.process_name_entry, "e.g., Process1")
+        self.add_placeholder(self.process_size_entry, "e.g., 1")
+
+    def set_configuration(self):
+        # Gather current settings
+        settings = {
+            "ram_size_gb": self.ram_size_var.get(),
+            "page_size_kb": self.page_size_var.get().replace("KB", "") if self.page_size_var.get() else "0",
+            "tlb_size": self.tlb_size_var.get() if self.tlb_size_var.get() else "0",
+            "tlb_enabled": self.tlb_enabled_var.get(),
+            "virtual_address_size": self.va_size_var.get()
+        }
+
+        # If this is the initial setup (Set Configuration)
+        if self.config_button["text"] == "Set Configuration":
+            message = (
+                "Please confirm the environment settings:\n\n"
+                f"RAM Size: {settings['ram_size_gb']} GB\n"
+                f"Page Size: {settings['page_size_kb']} KB\n"
+                f"TLB Size: {settings['tlb_size']}\n"
+                f"TLB Enabled: {settings['tlb_enabled']}\n"
+                f"Virtual Address Size: {settings['virtual_address_size']}\n\n"
+                "Click OK to confirm."
+            )
+            if messagebox.askokcancel("Confirm Environment Settings", message):
+                # Save settings to environment_settings.json
+                with open("environment_settings.json", "w") as f:
+                    json.dump(settings, f, indent=4)
+                # Enable process addition section
+                self.enable_process_add_section()
+                # Change button to "Update Configuration"
+                self.config_button.config(text="Update Configuration")
+                messagebox.showinfo("Success", "Environment settings confirmed. You can now add processes.")
+        else:
+            # Update Configuration
+            # Load previous settings
+            try:
+                with open("environment_settings.json", "r") as f:
+                    prev_settings = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError) as e:
+                messagebox.showerror("Error", "Could not load previous settings. Please set the configuration again.")
+                self.config_button.config(text="Set Configuration")
+                self.disable_process_add_section()
+                return
+
+            # Compare new settings with previous settings
+            settings_unchanged = (
+                settings["ram_size_gb"] == prev_settings["ram_size_gb"] and
+                settings["page_size_kb"] == prev_settings["page_size_kb"] and
+                settings["tlb_size"] == prev_settings["tlb_size"] and
+                settings["tlb_enabled"] == prev_settings["tlb_enabled"] and
+                settings["virtual_address_size"] == prev_settings["virtual_address_size"]
+            )
+
+            if settings_unchanged:
+                messagebox.showinfo("No Changes", "No changes detected. Please modify at least one setting to update.")
+                return
+
+            message = (
+                "Environment Settings Update:\n\n"
+                "Previous Settings:\n"
+                f"RAM Size: {prev_settings['ram_size_gb']} GB\n"
+                f"Page Size: {prev_settings['page_size_kb']} KB\n"
+                f"TLB Size: {prev_settings['tlb_size']}\n"
+                f"TLB Enabled: {prev_settings['tlb_enabled']}\n"
+                f"Virtual Address Size: {prev_settings['virtual_address_size']}\n\n"
+                "New Settings:\n"
+                f"RAM Size: {settings['ram_size_gb']} GB\n"
+                f"Page Size: {settings['page_size_kb']} KB\n"
+                f"TLB Size: {settings['tlb_size']}\n"
+                f"TLB Enabled: {settings['tlb_enabled']}\n"
+                f"Virtual Address Size: {settings['virtual_address_size']}\n\n"
+                "Click OK to update."
+            )
+            if messagebox.askokcancel("Update Environment Settings", message):
+                # Update environment_settings.json
+                try:
+                    with open("environment_settings.json", "w") as f:
+                        json.dump(settings, f, indent=4)
+                    messagebox.showinfo("Success", "Environment settings updated successfully!")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to update settings: {str(e)}")
 
     def clear_placeholder(self, entry, placeholder):
         if entry.get() == placeholder:
@@ -145,8 +266,10 @@ class VirtualMemoryUI:
     def toggle_system_dropdown(self, event):
         if self.process_type_var.get() == "System":
             self.system_process_frame.pack(anchor="w", pady=5)
+            self.system_process_menu.config(state="readonly")
         else:
             self.system_process_frame.pack_forget()
+            self.system_process_menu.config(state="disabled")
 
     def update_options(self, event):
         ram_size_gb = int(self.ram_size_var.get())
