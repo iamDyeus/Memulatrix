@@ -59,6 +59,12 @@ std::vector<Process> VirtualMemorySimulator::load_processes() {
         proc_str = proc_str.substr(1, proc_str.size() - 2); // Remove { and }
 
         Process p;
+        // Initialize default values
+        p.virtual_address = 0;
+        p.virtual_address_size = "N/A";
+        p.is_process_stop = false;
+        p.has_priority = false;  // Default to no priority
+
         std::stringstream ss(proc_str);
         std::string token;
         while (std::getline(ss, token, ',')) {
@@ -72,7 +78,21 @@ std::vector<Process> VirtualMemorySimulator::load_processes() {
             else if (key == "name") p.name = value;
             else if (key == "size_gb") p.size_bytes = std::stoi(value) * 1024ULL * 1024 * 1024;
             else if (key == "type") p.type = value;
-            else if (key == "priority") p.priority = value;
+            else if (key == "has_priority") p.has_priority = (value == "true");
+            else if (key == "virtual_address") {
+                // Remove "0x" prefix and parse hex string to integer
+                if (value.substr(0, 2) == "0x") {
+                    value = value.substr(2);
+                }
+                try {
+                    p.virtual_address = std::stoul(value, nullptr, 16);
+                } catch (const std::exception& e) {
+                    std::cerr << "Error parsing virtual_address for process " << p.id << ": " << value << std::endl;
+                    p.virtual_address = 0;
+                }
+            }
+            else if (key == "virtual_address_size") p.virtual_address_size = value;
+            else if (key == "is_process_stop") p.is_process_stop = (value == "true");
         }
         processes.push_back(p);
     }
@@ -84,7 +104,15 @@ int main() {
     VirtualMemorySimulator sim(1ULL * 1024 * 1024 * 1024, 4096, 16, true);
     auto processes = sim.load_processes();
     for (const auto& proc : processes) {
-        std::cout << "Process ID: " << proc.id << ", Name: " << proc.name << ", Size: " << proc.size_bytes / (1024ULL * 1024 * 1024) << "GB, Type: " << proc.type << ", Priority: " << proc.priority << std::endl;
+        std::cout << "Process ID: " << proc.id
+                  << ", Name: " << proc.name
+                  << ", Size: " << proc.size_bytes / (1024ULL * 1024 * 1024) << "GB"
+                  << ", Type: " << proc.type
+                  << ", Has Priority: " << (proc.has_priority ? "Yes" : "No")
+                  << ", Virtual Address: 0x" << std::hex << proc.virtual_address << std::dec
+                  << ", Virtual Address Size: " << proc.virtual_address_size
+                  << ", Stopped: " << (proc.is_process_stop ? "Yes" : "No")
+                  << std::endl;
     }
     return 0;
 }

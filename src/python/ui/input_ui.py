@@ -53,9 +53,9 @@ class VirtualMemoryUI:
         tk.Checkbutton(memory_settings_frame, text="Enable TLB Usage", variable=self.tlb_enabled_var).pack(anchor="w", pady=5)
         # Virtual Address Size Selection
         tk.Label(memory_settings_frame, text="Virtual Address Size:", bg="lightskyblue").pack(anchor="w", pady=2)
-        self.va_size_var = tk.StringVar(value="32-bit")
-        va_size_menu = ttk.Combobox(memory_settings_frame, textvariable=self.va_size_var, values=["16-bit", "32-bit", "64-bit"], width=15)
-        va_size_menu.pack(pady=5)
+        self.va_size_var = tk.StringVar(value="16-bit")
+        self.va_size_menu = ttk.Combobox(memory_settings_frame, textvariable=self.va_size_var, values=["16-bit"], width=15)
+        self.va_size_menu.pack(pady=5)
 
         # Process Addition Frame
         process_add_frame = tk.Frame(main_frame, bg="lightskyblue", padx=10, pady=10, relief="groove", borderwidth=2)
@@ -95,16 +95,7 @@ class VirtualMemoryUI:
 
         # Set Priority Checkbox
         self.set_priority_var = tk.BooleanVar()
-        tk.Checkbutton(process_add_frame, text="Set Priority?", variable=self.set_priority_var, bg="lightskyblue", command=self.toggle_priority_entry).pack(anchor="w", pady=5)
-
-        # Priority Entry (hidden by default)
-        self.priority_frame = tk.Frame(process_add_frame, bg="lightskyblue")
-        tk.Label(self.priority_frame, text="Priority:", bg="lightskyblue").pack(anchor="w", pady=2)
-        self.priority_entry = tk.Entry(self.priority_frame, width=20, fg="gray")
-        self.priority_entry.insert(0, "e.g., 5")
-        self.priority_entry.bind("<FocusIn>", lambda e: self.clear_placeholder(self.priority_entry, "e.g., 5"))
-        self.priority_entry.bind("<FocusOut>", lambda e: self.add_placeholder(self.priority_entry, "e.g., 5"))
-        self.priority_entry.pack(pady=5)
+        tk.Checkbutton(process_add_frame, text="Set Priority?", variable=self.set_priority_var, bg="lightskyblue").pack(anchor="w", pady=5)
 
         # Add Process Button
         tk.Button(process_add_frame, text="Add Process", bg="dodgerblue", fg="white", command=self.save_process).pack(pady=10)
@@ -115,7 +106,7 @@ class VirtualMemoryUI:
         tk.Label(active_processes_frame, text="Active Processes", font=("Helvetica", 11, "bold"), bg="lightcyan", fg="darkslategray").pack(anchor="w")
         self.process_container = tk.Frame(active_processes_frame, bg="lightcyan")
         self.process_container.pack(fill="both", expand=True)
-        self.process_list = []
+        self.process_list = []  # List of tuples: (frame, process_index)
         self.process_data = []  # List to store process info for JSON
         self.no_processes_label = tk.Label(self.process_container, text="No active processes", font=("Helvetica", 10, "italic"), bg="lightcyan", fg="gray")
         self.no_processes_label.pack(pady=20)
@@ -131,6 +122,15 @@ class VirtualMemoryUI:
 
         # Initial update
         self.update_options(None)
+
+        # Bind the window close event to delete processes.json
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def on_closing(self):
+        # Delete processes.json when the UI is closed
+        if os.path.exists("processes.json"):
+            os.remove("processes.json")
+        self.root.destroy()
 
     def clear_placeholder(self, entry, placeholder):
         if entry.get() == placeholder:
@@ -148,12 +148,6 @@ class VirtualMemoryUI:
         else:
             self.system_process_frame.pack_forget()
 
-    def toggle_priority_entry(self):
-        if self.set_priority_var.get():
-            self.priority_frame.pack(anchor="w", pady=5)
-        else:
-            self.priority_frame.pack_forget()
-
     def update_options(self, event):
         ram_size_gb = int(self.ram_size_var.get())
         ram_bytes = ram_size_gb * 1024 * 1024 * 1024
@@ -167,14 +161,28 @@ class VirtualMemoryUI:
         self.tlb_size_menu['state'] = "readonly" if tlb_options else "disabled"
         self.tlb_size_var.set(tlb_options[0] if tlb_options else "")
 
+        # Update virtual address size options based on RAM size
+        va_size_options = []
+        if ram_size_gb < 16:
+            va_size_options = ["16-bit"]
+        elif ram_size_gb < 32:
+            va_size_options = ["16-bit", "32-bit"]
+        else:  # ram_size_gb < 64
+            va_size_options = ["16-bit", "32-bit", "64-bit"]
+        self.va_size_menu['values'] = va_size_options
+        self.va_size_menu['state'] = "readonly" if va_size_options else "disabled"
+        # Set default to the smallest available option
+        self.va_size_var.set(va_size_options[0] if va_size_options else "")
+
     def load_processes_from_json(self):
         if os.path.exists("processes.json"):
             with open("processes.json", "r") as f:
                 self.process_data = json.load(f)
-                for proc in self.process_data:
-                    process_info = f"ID: {proc['id']}, Name: {proc['name']}, Size: {proc['size_gb']}GB, Type: {proc['type']}, Priority: {proc['priority']}, VA: {proc['virtual_address']}"
-                    self.add_process_to_list(process_info)
-                    self.next_process_id = max(self.next_process_id, int(proc['id']) + 1)
+                for idx, proc in enumerate(self.process_data):
+                    process_info = f"ID: {proc['id']}, Name: {proc['name']}, Size: {proc['size_gb']}GB, Type: {proc['type']}, Has Priority: {proc['has_priority']}, VA: {proc['virtual_address']}"
+                    self.add_process_to_list(process_info, idx, proc.get("is_process_stop", False))
+                self.reorder_process_list()
+                self.next_process_id = max(self.next_process_id, int(proc['id']) + 1)
 
     def save_processes_to_json(self):
         with open("processes.json", "w") as f:
@@ -201,20 +209,35 @@ class VirtualMemoryUI:
         ram_size_bytes = int(self.ram_size_var.get()) * 1024 * 1024 * 1024
         max_physical_address = ram_size_bytes - 1
         # Simple mapping: modulo the virtual address to fit within RAM size
-        # This is a placeholder mapping; actual translation will be in C++
         virtual_address = virtual_address % (max_physical_address + 1)
 
-        return virtual_address
+        # Check for conflicts with existing virtual addresses
+        existing_addresses = {int(proc["virtual_address"], 16) for proc in self.process_data}
+        attempt = 0
+        original_hash = virtual_address
+        while virtual_address in existing_addresses and attempt < 1000:
+            # Increment the timestamp slightly and rehash to avoid conflict
+            attempt += 1
+            hash_obj = hashlib.sha256((str(timestamp) + str(attempt)).encode())
+            virtual_address = int(hash_obj.hexdigest(), 16) & max_va
+            virtual_address = virtual_address % (max_physical_address + 1)
+
+        if attempt >= 1000:
+            # Fallback: use a random offset if we can't find a unique address
+            virtual_address = (original_hash + len(existing_addresses) + 1) & max_va
+            virtual_address = virtual_address % (max_physical_address + 1)
+
+        # Convert to hexadecimal string
+        return hex(virtual_address)
 
     def save_process(self):
         process_name = self.process_name_entry.get()
         process_size = self.process_size_entry.get()
         process_type = self.process_type_var.get()
         system_process = self.system_process_var.get() if process_type == "System" else None
-        set_priority = self.set_priority_var.get()
-        priority = self.priority_entry.get() if set_priority else "N/A"
+        has_priority = self.set_priority_var.get()
 
-        if (process_name in ["", "e.g., Process1"] or process_size in ["", "e.g., 1"] or (set_priority and priority in ["", "e.g., 5"])):
+        if process_name in ["", "e.g., Process1"] or process_size in ["", "e.g., 1"]:
             messagebox.showerror("Error", "All required fields must be filled!")
             return
 
@@ -222,29 +245,32 @@ class VirtualMemoryUI:
         process_id = str(self.next_process_id)
         self.next_process_id += 1
 
-        # Capture timestamp
+        # Capture timestamp for virtual address and addition time
         timestamp = time.time()
 
-        # Generate virtual address
+        # Generate virtual address (in hexadecimal)
         virtual_address = self.generate_virtual_address(timestamp)
 
         # Use system process name if type is System
         display_name = system_process if process_type == "System" else process_name
-        process_info = f"ID: {process_id}, Name: {display_name}, Size: {process_size}GB, Type: {process_type}, Priority: {priority}, VA: {virtual_address}"
+        process_info = f"ID: {process_id}, Name: {display_name}, Size: {process_size}GB, Type: {process_type}, Has Priority: {has_priority}, VA: {virtual_address}"
 
-        # Add to process data list
+        # Add to process data list with timestamp and is_process_stop set to False
         self.process_data.append({
             "id": process_id,
             "name": display_name,
             "size_gb": int(process_size),
             "type": process_type,
-            "priority": priority,
+            "has_priority": has_priority,
             "virtual_address": virtual_address,
-            "virtual_address_size": self.va_size_var.get()  # Store the selected virtual address size
+            "virtual_address_size": self.va_size_var.get(),
+            "is_process_stop": False,
+            "timestamp": timestamp  # Store the time the process was added
         })
 
         # Update UI and JSON
-        self.add_process_to_list(process_info)
+        self.add_process_to_list(process_info, len(self.process_data) - 1, False)
+        self.reorder_process_list()
         self.save_processes_to_json()
         messagebox.showinfo("Success", f"Added Process: {process_info}")
 
@@ -255,35 +281,101 @@ class VirtualMemoryUI:
         self.process_size_entry.delete(0, tk.END)
         self.process_size_entry.insert(0, "e.g., 1")
         self.process_size_entry.config(fg="gray")
-        if set_priority:
-            self.priority_entry.delete(0, tk.END)
-            self.priority_entry.insert(0, "e.g., 5")
-            self.priority_entry.config(fg="gray")
 
-    def add_process_to_list(self, process_info):
+    def reorder_process_list(self):
+        # Store the current stop/resume state of each process
+        stop_states = {}
+        for frame, idx in self.process_list:
+            is_stopped = self.process_data[idx]["is_process_stop"]
+            stop_states[idx] = is_stopped
+
+        # Clear the current display
+        for frame, _ in self.process_list:
+            frame.destroy()
+        self.process_list.clear()
+
+        if not self.process_data:
+            self.no_processes_label = tk.Label(self.process_container, text="No active processes", font=("Helvetica", 10, "italic"), bg="lightcyan", fg="gray")
+            self.no_processes_label.pack(pady=20)
+            return
+
+        # Sort processes:
+        # 1. Priority processes first, ordered by timestamp
+        # 2. Non-priority processes next, ordered by timestamp
+        # 3. Stopped processes last, maintaining their relative order
+        priority_running = sorted(
+            [proc for proc in self.process_data if proc["has_priority"] and not proc["is_process_stop"]],
+            key=lambda x: x["timestamp"]
+        )
+        non_priority_running = sorted(
+            [proc for proc in self.process_data if not proc["has_priority"] and not proc["is_process_stop"]],
+            key=lambda x: x["timestamp"]
+        )
+        stopped = sorted(
+            [proc for proc in self.process_data if proc["is_process_stop"]],
+            key=lambda x: x["timestamp"]
+        )
+
+        # Combine the lists in the correct order
+        ordered_data = priority_running + non_priority_running + stopped
+
+        # Rebuild the UI list in the new order
+        for proc in ordered_data:
+            # Find the index of this process in self.process_data
+            idx = next(i for i, p in enumerate(self.process_data) if p["id"] == proc["id"])
+            process_info = f"ID: {proc['id']}, Name: {proc['name']}, Size: {proc['size_gb']}GB, Type: {proc['type']}, Has Priority: {proc['has_priority']}, VA: {proc['virtual_address']}"
+            # Use the stop state from before reordering
+            is_stopped = stop_states.get(idx, proc["is_process_stop"])
+            self.add_process_to_list(process_info, idx, is_stopped)
+
+    def add_process_to_list(self, process_info, process_idx, is_stopped):
         if self.no_processes_label.winfo_exists():
             self.no_processes_label.destroy()
 
         process_frame = tk.Frame(self.process_container, bg="white" if len(self.process_list) % 2 == 0 else "whitesmoke", bd=1, relief="solid")
         process_frame.pack(fill="x", pady=2)
         tk.Label(process_frame, text=process_info, font=("Helvetica", 10), bg=process_frame.cget("bg"), fg="darkslategray").pack(side="left", padx=5, pady=5)
-        tk.Button(process_frame, text="Remove", bg="salmon", fg="white", font=("Helvetica", 8, "bold"), command=lambda: self.remove_process(process_frame)).pack(side="right", padx=5)
-        tk.Button(process_frame, text="Stop", bg="orange", fg="white", font=("Helvetica", 8, "bold"), command=lambda: self.stop_process(process_frame)).pack(side="right", padx=5)
-        self.process_list.append(process_frame)
+        tk.Button(process_frame, text="Remove", bg="salmon", fg="white", font=("Helvetica", 8, "bold"), command=lambda: self.remove_process(process_frame, process_idx)).pack(side="right", padx=5)
+        
+        # Create a container for the stop/resume button
+        process_frame.button = tk.Button(
+            process_frame,
+            text="Stop" if not is_stopped else "Resume",
+            bg="orange" if not is_stopped else "green",
+            fg="white",
+            font=("Helvetica", 8, "bold"),
+            command=lambda: self.stop_process(process_frame, process_idx) if not is_stopped else self.resume_process(process_frame, process_idx)
+        )
+        process_frame.button.pack(side="right", padx=5)
+        
+        self.process_list.append((process_frame, process_idx))
 
-    def remove_process(self, process_frame):
-        # Find the index of the process to remove
-        idx = self.process_list.index(process_frame)
-        self.process_data.pop(idx)
-        process_frame.destroy()
-        self.process_list.remove(process_frame)
-        if not self.process_list:
-            self.no_processes_label = tk.Label(self.process_container, text="No active processes", font=("Helvetica", 10, "italic"), bg="lightcyan", fg="gray")
-            self.no_processes_label.pack(pady=20)
+    def remove_process(self, process_frame, process_idx):
+        self.process_data.pop(process_idx)
+        self.reorder_process_list()
         self.save_processes_to_json()
 
-    def stop_process(self, process_frame):
-        messagebox.showinfo("Info", "Process stopped (functionality to be implemented)")
+    def stop_process(self, process_frame, process_idx):
+        self.process_data[process_idx]["is_process_stop"] = True
+        process_frame.button.configure(
+            text="Resume",
+            bg="green",
+            command=lambda: self.resume_process(process_frame, process_idx)
+        )
+        self.reorder_process_list()
+        self.save_processes_to_json()
+        messagebox.showinfo("Info", f"Process {self.process_data[process_idx]['name']} stopped")
+
+    def resume_process(self, process_frame, process_idx):
+        self.process_data[process_idx]["is_process_stop"] = False
+        process_frame.button.configure(
+            text="Stop",
+            bg="orange",
+            command=lambda: self.stop_process(process_frame, process_idx)
+        )
+        self.reorder_process_list()
+        self.save_processes_to_json()
+        messagebox.showinfo("Info", f"Process {self.process_data[process_idx]['name']} resumed")
 
 if __name__ == "__main__":
     root = tk.Tk()
