@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import json
 import os
+import time
+import hashlib
 
 class VirtualMemoryUI:
     def __init__(self, root):
@@ -49,6 +51,11 @@ class VirtualMemoryUI:
         self.tlb_size_menu.pack(pady=5)
         self.tlb_enabled_var = tk.BooleanVar()
         tk.Checkbutton(memory_settings_frame, text="Enable TLB Usage", variable=self.tlb_enabled_var).pack(anchor="w", pady=5)
+        # Virtual Address Size Selection
+        tk.Label(memory_settings_frame, text="Virtual Address Size:", bg="lightskyblue").pack(anchor="w", pady=2)
+        self.va_size_var = tk.StringVar(value="32-bit")
+        va_size_menu = ttk.Combobox(memory_settings_frame, textvariable=self.va_size_var, values=["16-bit", "32-bit", "64-bit"], width=15)
+        va_size_menu.pack(pady=5)
 
         # Process Addition Frame
         process_add_frame = tk.Frame(main_frame, bg="lightskyblue", padx=10, pady=10, relief="groove", borderwidth=2)
@@ -157,7 +164,7 @@ class VirtualMemoryUI:
         self.page_size_var.set(page_options[0] if page_options else "")
         tlb_options = ["16", "32", "64"]
         self.tlb_size_menu['values'] = tlb_options
-        self.tlb_size_menu['state'] = "readonly" if page_options else "disabled"
+        self.tlb_size_menu['state'] = "readonly" if tlb_options else "disabled"
         self.tlb_size_var.set(tlb_options[0] if tlb_options else "")
 
     def load_processes_from_json(self):
@@ -165,13 +172,39 @@ class VirtualMemoryUI:
             with open("processes.json", "r") as f:
                 self.process_data = json.load(f)
                 for proc in self.process_data:
-                    process_info = f"ID: {proc['id']}, Name: {proc['name']}, Size: {proc['size_gb']}GB, Type: {proc['type']}, Priority: {proc['priority']}"
+                    process_info = f"ID: {proc['id']}, Name: {proc['name']}, Size: {proc['size_gb']}GB, Type: {proc['type']}, Priority: {proc['priority']}, VA: {proc['virtual_address']}"
                     self.add_process_to_list(process_info)
                     self.next_process_id = max(self.next_process_id, int(proc['id']) + 1)
 
     def save_processes_to_json(self):
         with open("processes.json", "w") as f:
             json.dump(self.process_data, f, indent=4)
+
+    def generate_virtual_address(self, timestamp):
+        # Hash the timestamp to generate a virtual address
+        hash_obj = hashlib.sha256(str(timestamp).encode())
+        hash_value = int(hash_obj.hexdigest(), 16)
+
+        # Determine max virtual address based on selected size
+        va_size = self.va_size_var.get()
+        if va_size == "16-bit":
+            max_va = (1 << 16) - 1  # 2^16 - 1
+        elif va_size == "32-bit":
+            max_va = (1 << 32) - 1  # 2^32 - 1
+        else:  # 64-bit
+            max_va = (1 << 64) - 1  # 2^64 - 1
+
+        # Ensure virtual address fits within the selected virtual address size
+        virtual_address = hash_value & max_va
+
+        # Ensure the virtual address maps to a physical address within RAM size
+        ram_size_bytes = int(self.ram_size_var.get()) * 1024 * 1024 * 1024
+        max_physical_address = ram_size_bytes - 1
+        # Simple mapping: modulo the virtual address to fit within RAM size
+        # This is a placeholder mapping; actual translation will be in C++
+        virtual_address = virtual_address % (max_physical_address + 1)
+
+        return virtual_address
 
     def save_process(self):
         process_name = self.process_name_entry.get()
@@ -189,9 +222,15 @@ class VirtualMemoryUI:
         process_id = str(self.next_process_id)
         self.next_process_id += 1
 
+        # Capture timestamp
+        timestamp = time.time()
+
+        # Generate virtual address
+        virtual_address = self.generate_virtual_address(timestamp)
+
         # Use system process name if type is System
         display_name = system_process if process_type == "System" else process_name
-        process_info = f"ID: {process_id}, Name: {display_name}, Size: {process_size}GB, Type: {process_type}, Priority: {priority}"
+        process_info = f"ID: {process_id}, Name: {display_name}, Size: {process_size}GB, Type: {process_type}, Priority: {priority}, VA: {virtual_address}"
 
         # Add to process data list
         self.process_data.append({
@@ -199,7 +238,9 @@ class VirtualMemoryUI:
             "name": display_name,
             "size_gb": int(process_size),
             "type": process_type,
-            "priority": priority
+            "priority": priority,
+            "virtual_address": virtual_address,
+            "virtual_address_size": self.va_size_var.get()  # Store the selected virtual address size
         })
 
         # Update UI and JSON
