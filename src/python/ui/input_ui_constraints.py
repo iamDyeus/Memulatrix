@@ -7,32 +7,51 @@ import hashlib
 class CustomMessageBox(ctk.CTkToplevel):
     def __init__(self, parent, title, message, options):
         super().__init__(parent)
+        print(f"[CustomMessageBox] Creating dialog with title: {title}")
+        print(f"[CustomMessageBox] Message: {message}")
+        print(f"[CustomMessageBox] Options: {options}")
+
         self.title(title)
-        self.geometry("400x300")
+        # Increase dialog size to ensure buttons are visible
+        self.geometry("500x400")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
 
         self.result = None
 
+        # Create a scrollable frame for the message in case it's long
         message_frame = ctk.CTkFrame(self)
         message_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
-        ctk.CTkLabel(message_frame, text=message, wraplength=350, font=("Arial", 12)).pack(pady=10, padx=10)
+        message_label = ctk.CTkLabel(message_frame, text=message, wraplength=450, font=("Arial", 12))
+        message_label.pack(pady=10, padx=10)
 
+        # Create a frame for buttons
         button_frame = ctk.CTkFrame(self, fg_color="transparent")
         button_frame.pack(pady=10, fill="x", padx=10)
 
+        # Add buttons and debug their geometry
+        self.buttons = []
         for option in options:
+            print(f"[CustomMessageBox] Adding button: {option}")
             btn = ctk.CTkButton(
                 button_frame,
                 text=option,
                 command=lambda opt=option: self.on_button_click(opt),
-                width=80
+                width=100  # Increase button width for visibility
             )
-            btn.pack(side="left", padx=10, pady=5)
+            btn.pack(side="left", padx=15, pady=10)  # Increase padding for better spacing
+            self.buttons.append(btn)
+            # Force update to ensure button is rendered
+            btn.update()
+            print(f"[CustomMessageBox] Button '{option}' geometry: x={btn.winfo_x()}, y={btn.winfo_y()}, width={btn.winfo_width()}, height={btn.winfo_height()}")
 
+        # Force update of the entire dialog
         self.update_idletasks()
+        print(f"[CustomMessageBox] Dialog geometry: width={self.winfo_width()}, height={self.winfo_height()}")
+
+        # Center the dialog relative to the parent window
         parent_width = parent.winfo_width()
         parent_height = parent.winfo_height()
         parent_x = parent.winfo_rootx()
@@ -44,6 +63,7 @@ class CustomMessageBox(ctk.CTkToplevel):
         self.geometry(f"+{x}+{y}")
 
     def on_button_click(self, option):
+        print(f"[CustomMessageBox] Button clicked: {option}")
         self.result = option
         self.destroy()
 
@@ -52,16 +72,26 @@ class CustomMessageBox(ctk.CTkToplevel):
         return self.result
 
 class LogicHandler:
-    def __init__(self, ui):
+    def __init__(self, ui, env_file_path=None, proc_file_path=None):
         self.ui = ui
         self.process_data = []
         self.next_process_id = 1001
+        # Use the provided file paths
+        self.env_file_path = env_file_path if env_file_path is not None else os.path.join(r"..\..\..\bin", "environment_settings.json")
+        self.proc_file_path = proc_file_path if proc_file_path is not None else os.path.join(r"..\..\..\bin", "processes.json")
+
+        # Debug: Log the paths at initialization
+        print(f"[LogicHandler] Current working directory: {os.getcwd()}")
+        print(f"[LogicHandler] Relative env file path: {self.env_file_path}")
+        print(f"[LogicHandler] Resolved env file path: {os.path.abspath(self.env_file_path)}")
+        print(f"[LogicHandler] Relative proc file path: {self.proc_file_path}")
+        print(f"[LogicHandler] Resolved proc file path: {os.path.abspath(self.proc_file_path)}")
 
     def on_closing(self):
-        if os.path.exists("processes.json"):
-            os.remove("processes.json")
-        if os.path.exists("environment_settings.json"):
-            os.remove("environment_settings.json")
+        if os.path.exists(self.proc_file_path):
+            os.remove(self.proc_file_path)
+        if os.path.exists(self.env_file_path):
+            os.remove(self.env_file_path)
         self.ui.app.destroy()
 
     def disable_process_add_section(self):
@@ -71,6 +101,11 @@ class LogicHandler:
         self.ui.enable_process_add_section()
 
     def set_configuration(self):
+        # Debug: Log the working directory and paths before writing
+        print(f"[set_configuration] Current working directory: {os.getcwd()}")
+        print(f"[set_configuration] Writing to env file: {self.env_file_path}")
+        print(f"[set_configuration] Resolved env file path: {os.path.abspath(self.env_file_path)}")
+
         settings = {
             "ram_size_gb": self.ui.ram_size_var.get(),
             "page_size_kb": self.ui.page_size_var.get().replace("KB", "") if self.ui.page_size_var.get() else "0",
@@ -93,14 +128,14 @@ class LogicHandler:
             )
             dialog = CustomMessageBox(self.ui.app, "Confirm Environment Settings", message, ["OK", "Cancel"])
             if dialog.get() == "OK":
-                with open("environment_settings.json", "w") as f:
+                with open(self.env_file_path, "w") as f:
                     json.dump(settings, f, indent=4)
                 self.enable_process_add_section()
                 self.ui.config_button.configure(text="Update Configuration")
                 CustomMessageBox(self.ui.app, "Success", "Environment settings confirmed. You can now add processes.", ["OK"])
         else:
             try:
-                with open("environment_settings.json", "r") as f:
+                with open(self.env_file_path, "r") as f:
                     prev_settings = json.load(f)
             except (FileNotFoundError, json.JSONDecodeError) as e:
                 CustomMessageBox(self.ui.app, "Error", "Could not load previous settings. Please set the configuration again.", ["OK"])
@@ -118,8 +153,43 @@ class LogicHandler:
             )
 
             if settings_unchanged:
-                CustomMessageBox(self.ui.app, "No Changes", "No changes detected. Please modify at least one setting to update.", ["OK"])
-                return
+                message = (
+                    "Environment Settings Update:\n\n"
+                    "Previous Settings:\n"
+                    f"RAM Size: {prev_settings['ram_size_gb']} GB\n"
+                    f"Page Size: {prev_settings['page_size_kb']} KB\n"
+                    f"TLB Size: {prev_settings['tlb_size']}\n"
+                    f"TLB Enabled: {prev_settings['tlb_enabled']}\n"
+                    f"Virtual Address Size: {prev_settings['virtual_address_size']}\n"
+                    f"ROM Size: {prev_settings['rom_size']}\n\n"
+                    "New Settings:\n"
+                    f"RAM Size: {settings['ram_size_gb']} GB\n"
+                    f"Page Size: {settings['page_size_kb']} KB\n"
+                    f"TLB Size: {settings['tlb_size']}\n"
+                    f"TLB Enabled: {settings['tlb_enabled']}\n"
+                    f"Virtual Address Size: {settings['virtual_address_size']}\n"
+                    f"ROM Size: {settings['rom_size']}\n\n"
+                    "No changes detected, but you can still confirm to proceed.\nClick OK to update or Cancel to discard."
+                )
+            else:
+                message = (
+                    "Environment Settings Update:\n\n"
+                    "Previous Settings:\n"
+                    f"RAM Size: {prev_settings['ram_size_gb']} GB\n"
+                    f"Page Size: {prev_settings['page_size_kb']} KB\n"
+                    f"TLB Size: {prev_settings['tlb_size']}\n"
+                    f"TLB Enabled: {prev_settings['tlb_enabled']}\n"
+                    f"Virtual Address Size: {prev_settings['virtual_address_size']}\n"
+                    f"ROM Size: {prev_settings['rom_size']}\n\n"
+                    "New Settings:\n"
+                    f"RAM Size: {settings['ram_size_gb']} GB\n"
+                    f"Page Size: {settings['page_size_kb']} KB\n"
+                    f"TLB Size: {settings['tlb_size']}\n"
+                    f"TLB Enabled: {settings['tlb_enabled']}\n"
+                    f"Virtual Address Size: {settings['virtual_address_size']}\n"
+                    f"ROM Size: {settings['rom_size']}\n\n"
+                    "Click OK to update."
+                )
 
             prev_bits = self.get_bits(prev_settings["virtual_address_size"])
             new_bits = self.get_bits(settings["virtual_address_size"])
@@ -177,28 +247,14 @@ class LogicHandler:
                     self.reorder_process_list()
                     self.save_processes_to_json()
 
-            message = (
-                "Environment Settings Update:\n\n"
-                "Previous Settings:\n"
-                f"RAM Size: {prev_settings['ram_size_gb']} GB\n"
-                f"Page Size: {prev_settings['page_size_kb']} KB\n"
-                f"TLB Size: {prev_settings['tlb_size']}\n"
-                f"TLB Enabled: {prev_settings['tlb_enabled']}\n"
-                f"Virtual Address Size: {prev_settings['virtual_address_size']}\n"
-                f"ROM Size: {prev_settings['rom_size']}\n\n"
-                "New Settings:\n"
-                f"RAM Size: {settings['ram_size_gb']} GB\n"
-                f"Page Size: {settings['page_size_kb']} KB\n"
-                f"TLB Size: {settings['tlb_size']}\n"
-                f"TLB Enabled: {settings['tlb_enabled']}\n"
-                f"Virtual Address Size: {settings['virtual_address_size']}\n"
-                f"ROM Size: {settings['rom_size']}\n\n"
-                "Click OK to update."
-            )
+            # Show the confirmation dialog
             dialog = CustomMessageBox(self.ui.app, "Update Environment Settings", message, ["OK", "Cancel"])
             if dialog.get() == "OK":
+                # Debug: Log before writing
+                print(f"[set_configuration] Writing updated settings to: {self.env_file_path}")
+                print(f"[set_configuration] Resolved path: {os.path.abspath(self.env_file_path)}")
                 try:
-                    with open("environment_settings.json", "w") as f:
+                    with open(self.env_file_path, "w") as f:
                         json.dump(settings, f, indent=4)
                     CustomMessageBox(self.ui.app, "Success", "Environment settings updated successfully!", ["OK"])
                 except Exception as e:
@@ -259,17 +315,24 @@ class LogicHandler:
         self.ui.va_size_var.set(va_size_options[0] if va_size_options else "")
 
     def load_processes_from_json(self):
-        if os.path.exists("processes.json"):
-            with open("processes.json", "r") as f:
+        if os.path.exists(self.proc_file_path):
+            with open(self.proc_file_path, "r") as f:
                 self.process_data = json.load(f)
                 for idx, proc in enumerate(self.process_data):
                     process_info = f"ID: {proc['id']}, Name: {proc['name']}, Size: {proc['size_gb']}GB, Type: {proc['type']}, Has Priority: {proc['has_priority']}, VA: {proc['virtual_address']}"
                     self.ui.add_process_to_list(process_info, idx, proc.get("is_process_stop", False))
-                self.reorder_process_list()
-                self.next_process_id = max(self.next_process_id, int(proc['id']) + 1)
+                # Only update next_process_id if there are processes
+                if self.process_data:
+                    self.next_process_id = max(self.next_process_id, max(int(proc['id']) for proc in self.process_data) + 1)
+        self.reorder_process_list()
 
     def save_processes_to_json(self):
-        with open("processes.json", "w") as f:
+        # Debug: Log before writing
+        print(f"[save_processes_to_json] Writing to proc file: {self.proc_file_path}")
+        print(f"[save_processes_to_json] Resolved path: {os.path.abspath(self.proc_file_path)}")
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(self.proc_file_path), exist_ok=True)
+        with open(self.proc_file_path, "w") as f:
             json.dump(self.process_data, f, indent=4)
 
     def generate_virtual_address(self, timestamp):

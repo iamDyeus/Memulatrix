@@ -1,26 +1,41 @@
 #ifndef VIRTUAL_MEMORY_SIMULATOR_H
 #define VIRTUAL_MEMORY_SIMULATOR_H
 
-#include <vector>
 #include <string>
-#include <utility>
-#include "process.h"
+#include <vector>
+#include "json.hpp"
 
-class VirtualMemorySimulator {
-private:
-    uint64_t ram_size_bytes;     // Total RAM size in bytes
-    uint32_t page_size_bytes;    // Page size in bytes
-    uint32_t tlb_size;           // TLB size (number of entries)
-    bool tlb_enabled;            // Whether TLB is enabled
-    std::string virtual_address_size; // Virtual address size ("16-bit", "32-bit", "64-bit")
+using json = nlohmann::json;
 
-    // Helper function to trim whitespace and quotes
-    std::string trim(const std::string& str);
-
-public:
-    VirtualMemorySimulator();  // Constructor reads from environment_settings.json
-
-    std::vector<Process> load_processes();
+struct Process {
+    std::string id;
+    std::string name;
+    unsigned long long size_bytes;
+    std::string type;
+    bool has_priority;
+    unsigned long long virtual_address;
+    bool is_process_stop;
 };
 
-#endif // VIRTUAL_MEMORY_SIMULATOR_H
+class VirtualMemorySimulator {
+public:
+    VirtualMemorySimulator(const std::string& env_file, const std::string& proc_file);
+
+    void load_environment_settings();
+    std::vector<Process> load_processes();
+    void print_processes(const std::vector<Process>& processes);
+
+private:
+    std::string env_file_path;
+    std::string proc_file_path;
+
+    // Environment settings
+    unsigned long long ram_size_bytes;
+    unsigned long long page_size_bytes;
+    unsigned long tlb_size;
+    bool tlb_enabled;
+    std::string virtual_address_size;
+    std::string rom_size;
+};
+
+#endif

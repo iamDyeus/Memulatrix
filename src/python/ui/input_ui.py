@@ -1,8 +1,8 @@
 import customtkinter as ctk
-from input_ui_constraints import LogicHandler, CustomMessageBox
+from .input_ui_constraints import LogicHandler, CustomMessageBox
 
 class VirtualMemoryUI:
-    def __init__(self, app):
+    def __init__(self, app, env_file_path=None, proc_file_path=None):
         self.app = app
         self.app.title("Memulatrix - The Virtual Memory Simulator")
         self.app.resizable(True, True)
@@ -11,8 +11,8 @@ class VirtualMemoryUI:
         ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
 
-        # Initialize the logic handler
-        self.logic_handler = LogicHandler(self)
+        # Initialize the logic handler with the provided file paths
+        self.logic_handler = LogicHandler(self, env_file_path, proc_file_path)
 
         # Header Frame
         self.header_frame = ctk.CTkFrame(self.app, fg_color="transparent")
