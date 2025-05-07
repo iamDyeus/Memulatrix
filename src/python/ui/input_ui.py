@@ -105,8 +105,20 @@ class VirtualMemoryUI:
         self.priority_checkbutton = ctk.CTkCheckBox(self.process_frame, text="Set Priority?", variable=self.set_priority_var)
         self.priority_checkbutton.pack(pady=5)
 
-        self.add_process_button = ctk.CTkButton(self.process_frame, text="Add Process", command=self.logic_handler.save_process)
-        self.add_process_button.pack(pady=5)
+        # Button Frame for Add Process and Confirm Processes
+        self.button_frame = ctk.CTkFrame(self.process_frame, fg_color="transparent")
+        self.button_frame.pack(pady=5)
+
+        self.add_process_button = ctk.CTkButton(self.button_frame, text="Add Process", command=self.logic_handler.save_process)
+        self.add_process_button.pack(side="left", padx=5)
+
+        self.confirm_process_button = ctk.CTkButton(
+            self.button_frame,
+            text="Confirm Processes",
+            command=self.logic_handler.confirm_processes,
+            state="disabled"
+        )
+        self.confirm_process_button.pack(side="left", padx=5)
 
         self.logic_handler.disable_process_add_section()
 
@@ -145,6 +157,7 @@ class VirtualMemoryUI:
         self.set_priority_var.set(False)
         self.priority_checkbutton.configure(state="disabled")
         self.add_process_button.configure(state="disabled")
+        self.confirm_process_button.configure(state="disabled")
 
     def enable_process_add_section(self):
         self.process_name_entry.configure(state="normal")
@@ -156,6 +169,9 @@ class VirtualMemoryUI:
             self.system_process_menu.configure(state="disabled")
         self.priority_checkbutton.configure(state="normal")
         self.add_process_button.configure(state="normal")
+        # Enable Confirm Processes button if there are processes
+        if self.process_list:
+            self.confirm_process_button.configure(state="normal")
 
     def toggle_system_dropdown(self, value):
         if self.process_type_var.get() == "System":
@@ -169,6 +185,9 @@ class VirtualMemoryUI:
         if self.no_processes_label.winfo_exists():
             self.no_processes_label.destroy()
 
+        # Extract the process ID from the process_info string and normalize it
+        process_id = process_info.split(",")[0].split(":")[1].strip()
+
         process_frame = ctk.CTkFrame(self.process_container)
         process_frame.pack(fill="x", pady=2)
 
@@ -178,7 +197,7 @@ class VirtualMemoryUI:
         remove_button = ctk.CTkButton(
             process_frame,
             text="Remove",
-            command=lambda: self.logic_handler.remove_process(process_frame, process_idx),
+            command=lambda: self.logic_handler.remove_process(process_frame, process_id),
             fg_color="#FF6666",
             width=80
         )
@@ -187,14 +206,32 @@ class VirtualMemoryUI:
         stop_resume_button = ctk.CTkButton(
             process_frame,
             text="Stop" if not is_stopped else "Resume",
-            command=lambda: self.logic_handler.stop_process(process_frame, process_idx) if not is_stopped else self.logic_handler.resume_process(process_frame, process_idx),
-            fg_color="#0e19e6" if not is_stopped else "#66CC66",  # Changed Stop button color to red
+            command=lambda: self.logic_handler.stop_process(process_frame, process_id) if not is_stopped else self.logic_handler.resume_process(process_frame, process_id),
+            fg_color="#0e19e6" if not is_stopped else "#66CC66",
             width=80
         )
         stop_resume_button.pack(side="right", padx=5)
 
         process_frame.button = stop_resume_button
-        self.process_list.append((process_frame, process_idx))
+        self.process_list.append((process_frame, process_id))
+
+        # Enable the Confirm Processes button since there are now processes
+        self.confirm_process_button.configure(state="normal")
+
+    def remove_process(self, process_frame, process_id):
+        # Remove the process frame
+        for i, (frame, pid) in enumerate(self.process_list):
+            if frame == process_frame and pid == process_id:
+                frame.destroy()
+                self.process_list.pop(i)
+                break
+        # Disable the Confirm Processes button if no processes remain
+        if not self.process_list:
+            self.confirm_process_button.configure(state="disabled")
+            if self.no_processes_label.winfo_exists():
+                self.no_processes_label.destroy()
+            self.no_processes_label = ctk.CTkLabel(self.process_container, text="No active processes", font=("Arial", 12, "italic"))
+            self.no_processes_label.pack(pady=20)
 
 if __name__ == "__main__":
     app = ctk.CTk()

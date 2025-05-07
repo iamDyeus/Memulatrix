@@ -3,6 +3,7 @@ import json
 import os
 import time
 import hashlib
+import subprocess
 
 class CustomMessageBox(ctk.CTkToplevel):
     def __init__(self, parent, title, message, options):
@@ -61,15 +62,98 @@ class LogicHandler:
         self.ui = ui
         self.process_data = []
         self.next_process_id = 1001
-        self.env_file_path = env_file_path if env_file_path is not None else os.path.join(r"..\..\..\bin", "environment_settings.json")
-        self.proc_file_path = proc_file_path if proc_file_path is not None else os.path.join(r"..\..\..\bin", "processes.json")
+        self.has_run_simulation = False  # Track if the simulation has run at least once
+        self.bin_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), r"..\..\..\bin"))
+        self.env_file_path = env_file_path if env_file_path is not None else os.path.join(self.bin_dir, "environment_settings.json")
+        self.proc_file_path = proc_file_path if proc_file_path is not None else os.path.join(self.bin_dir, "processes.json")
+        self.result_path = os.path.join(self.bin_dir, "result.json")
+        self.simulator_path = os.path.join(self.bin_dir, "virtual_memory_simulator.exe")
+
+        try:
+            os.makedirs(self.bin_dir, exist_ok=True)
+        except Exception as e:
+            CustomMessageBox(self.ui.app, "Error", f"Failed to create bin directory at {self.bin_dir}: {str(e)}", ["OK"])
+            raise
 
     def on_closing(self):
         if os.path.exists(self.proc_file_path):
-            os.remove(self.proc_file_path)
+            try:
+                os.remove(self.proc_file_path)
+            except Exception as e:
+                CustomMessageBox(self.ui.app, "Error", f"Failed to remove file {self.proc_file_path}: {str(e)}", ["OK"])
         if os.path.exists(self.env_file_path):
-            os.remove(self.env_file_path)
+            try:
+                os.remove(self.env_file_path)
+            except Exception as e:
+                CustomMessageBox(self.ui.app, "Error", f"Failed to remove file {self.env_file_path}: {str(e)}", ["OK"])
+        if os.path.exists(self.result_path):
+            try:
+                os.remove(self.result_path)
+            except Exception as e:
+                CustomMessageBox(self.ui.app, "Error", f"Failed to remove file {self.result_path}: {str(e)}", ["OK"])
         self.ui.app.destroy()
+
+    def send_jsons_to_cpp(self, force_run=False):
+        settings = {
+            "ram_size_gb": self.ui.ram_size_var.get(),
+            "page_size_kb": self.ui.page_size_var.get().replace("KB", "") if self.ui.page_size_var.get() else "0",
+            "tlb_size": self.ui.tlb_size_var.get() if self.ui.tlb_size_var.get() else "0",
+            "tlb_enabled": self.ui.tlb_enabled_var.get(),
+            "virtual_address_size": self.ui.va_size_var.get(),
+            "rom_size": self.ui.rom_size_var.get()
+        }
+
+        try:
+            with open(self.env_file_path, "w") as f:
+                json.dump(settings, f, indent=4)
+                f.flush()
+                os.fsync(f.fileno())
+        except Exception as e:
+            CustomMessageBox(self.ui.app, "Error", f"Failed to write environment settings to {self.env_file_path}: {str(e)}", ["OK"])
+            return
+
+        if not os.path.exists(self.proc_file_path):
+            try:
+                with open(self.proc_file_path, "w") as f:
+                    json.dump([], f, indent=4)
+            except Exception as e:
+                CustomMessageBox(self.ui.app, "Error", f"Failed to create processes.json: {str(e)}", ["OK"])
+                return
+
+        # Check if both JSON files are non-empty before running the simulation (first time)
+        env_non_empty = os.path.exists(self.env_file_path) and os.path.getsize(self.env_file_path) > 0
+        proc_non_empty = os.path.exists(self.proc_file_path) and os.path.getsize(self.proc_file_path) > 0
+        try:
+            with open(self.proc_file_path, "r") as f:
+                processes = json.load(f)
+            proc_non_empty = proc_non_empty and len(processes) > 0
+        except Exception:
+            proc_non_empty = False
+
+        should_run = False
+        if force_run:  # Used by confirm_processes to always run the simulation
+            should_run = True
+        elif not self.has_run_simulation:
+            # First run: only execute if both JSONs are non-empty
+            should_run = env_non_empty and proc_non_empty
+        else:
+            # Subsequent runs: execute on any update to either JSON
+            should_run = True
+
+        if not should_run:
+            return
+
+        try:
+            if not os.path.exists(self.simulator_path):
+                CustomMessageBox(self.ui.app, "Error", f"Virtual Memory Simulator executable not found at {self.simulator_path}", ["OK"])
+                return
+
+            cmd = [self.simulator_path, self.env_file_path, self.proc_file_path]
+            subprocess.run(cmd, capture_output=True, text=True)
+            self.has_run_simulation = True
+        except Exception as e:
+            CustomMessageBox(self.ui.app, "Error", f"Failed to run simulation: {str(e)}", ["OK"])
+            return
 
     def disable_process_add_section(self):
         self.ui.disable_process_add_section()
@@ -100,11 +184,15 @@ class LogicHandler:
             )
             dialog = CustomMessageBox(self.ui.app, "Confirm Environment Settings", message, ["OK", "Cancel"])
             if dialog.get() == "OK":
-                with open(self.env_file_path, "w") as f:
-                    json.dump(settings, f, indent=4)
+                try:
+                    with open(self.env_file_path, "w") as f:
+                        json.dump(settings, f, indent=4)
+                except Exception as e:
+                    CustomMessageBox(self.ui.app, "Error", f"Failed to write environment settings to {self.env_file_path}: {str(e)}", ["OK"])
+                    return
                 self.enable_process_add_section()
                 self.ui.config_button.configure(text="Update Configuration")
-                CustomMessageBox(self.ui.app, "Success", "Environment settings confirmed. You can now add processes.", ["OK"])
+                self.send_jsons_to_cpp()
         else:
             try:
                 with open(self.env_file_path, "r") as f:
@@ -125,43 +213,26 @@ class LogicHandler:
             )
 
             if settings_unchanged:
-                message = (
-                    "Environment Settings Update:\n\n"
-                    "Previous Settings:\n"
-                    f"RAM Size: {prev_settings['ram_size_gb']} GB\n"
-                    f"Page Size: {prev_settings['page_size_kb']} KB\n"
-                    f"TLB Size: {prev_settings['tlb_size']}\n"
-                    f"TLB Enabled: {prev_settings['tlb_enabled']}\n"
-                    f"Virtual Address Size: {prev_settings['virtual_address_size']}\n"
-                    f"ROM Size: {prev_settings['rom_size']}\n\n"
-                    "New Settings:\n"
-                    f"RAM Size: {settings['ram_size_gb']} GB\n"
-                    f"Page Size: {settings['page_size_kb']} KB\n"
-                    f"TLB Size: {settings['tlb_size']}\n"
-                    f"TLB Enabled: {settings['tlb_enabled']}\n"
-                    f"Virtual Address Size: {settings['virtual_address_size']}\n"
-                    f"ROM Size: {settings['rom_size']}\n\n"
-                    "No changes detected, but you can still confirm to proceed.\nClick OK to update or Cancel to discard."
-                )
-            else:
-                message = (
-                    "Environment Settings Update:\n\n"
-                    "Previous Settings:\n"
-                    f"RAM Size: {prev_settings['ram_size_gb']} GB\n"
-                    f"Page Size: {prev_settings['page_size_kb']} KB\n"
-                    f"TLB Size: {prev_settings['tlb_size']}\n"
-                    f"TLB Enabled: {prev_settings['tlb_enabled']}\n"
-                    f"Virtual Address Size: {prev_settings['virtual_address_size']}\n"
-                    f"ROM Size: {prev_settings['rom_size']}\n\n"
-                    "New Settings:\n"
-                    f"RAM Size: {settings['ram_size_gb']} GB\n"
-                    f"Page Size: {settings['page_size_kb']} KB\n"
-                    f"TLB Size: {settings['tlb_size']}\n"
-                    f"TLB Enabled: {settings['tlb_enabled']}\n"
-                    f"Virtual Address Size: {settings['virtual_address_size']}\n"
-                    f"ROM Size: {settings['rom_size']}\n\n"
-                    "Click OK to update."
-                )
+                return
+
+            message = (
+                "Environment Settings Update:\n\n"
+                "Previous Settings:\n"
+                f"RAM Size: {prev_settings['ram_size_gb']} GB\n"
+                f"Page Size: {prev_settings['page_size_kb']} KB\n"
+                f"TLB Size: {prev_settings['tlb_size']}\n"
+                f"TLB Enabled: {prev_settings['tlb_enabled']}\n"
+                f"Virtual Address Size: {prev_settings['virtual_address_size']}\n"
+                f"ROM Size: {prev_settings['rom_size']}\n\n"
+                "New Settings:\n"
+                f"RAM Size: {settings['ram_size_gb']} GB\n"
+                f"Page Size: {settings['page_size_kb']} KB\n"
+                f"TLB Size: {settings['tlb_size']}\n"
+                f"TLB Enabled: {settings['tlb_enabled']}\n"
+                f"Virtual Address Size: {settings['virtual_address_size']}\n"
+                f"ROM Size: {settings['rom_size']}\n\n"
+                "Click OK to update."
+            )
 
             prev_bits = self.get_bits(prev_settings["virtual_address_size"])
             new_bits = self.get_bits(settings["virtual_address_size"])
@@ -218,15 +289,19 @@ class LogicHandler:
                         proc["virtual_address"] = self.format_virtual_address(addr_int, new_bits)
                     self.reorder_process_list()
                     self.save_processes_to_json()
+                    self.send_jsons_to_cpp()
 
             dialog = CustomMessageBox(self.ui.app, "Update Environment Settings", message, ["OK", "Cancel"])
             if dialog.get() == "OK":
                 try:
                     with open(self.env_file_path, "w") as f:
                         json.dump(settings, f, indent=4)
-                    CustomMessageBox(self.ui.app, "Success", "Environment settings updated successfully!", ["OK"])
+                    dialog = CustomMessageBox(self.ui.app, "Success", "Environment settings updated successfully!", ["OK"])
+                    dialog.get()
                 except Exception as e:
                     CustomMessageBox(self.ui.app, "Error", f"Failed to update settings: {str(e)}", ["OK"])
+                    return
+                self.send_jsons_to_cpp()
 
     def get_bits(self, va_size):
         if va_size == "16-bit":
@@ -284,19 +359,41 @@ class LogicHandler:
 
     def load_processes_from_json(self):
         if os.path.exists(self.proc_file_path):
-            with open(self.proc_file_path, "r") as f:
-                self.process_data = json.load(f)
-                for idx, proc in enumerate(self.process_data):
-                    process_info = f"ID: {proc['id']}, Name: {proc['name']}, Size: {proc['size_gb']}GB, Type: {proc['type']}, Has Priority: {proc['has_priority']}, VA: {proc['virtual_address']}"
-                    self.ui.add_process_to_list(process_info, idx, proc.get("is_process_stop", False))
-                if self.process_data:
-                    self.next_process_id = max(self.next_process_id, max(int(proc['id']) for proc in self.process_data) + 1)
+            try:
+                with open(self.proc_file_path, "r") as f:
+                    self.process_data = json.load(f)
+                    for idx, proc in enumerate(self.process_data):
+                        process_info = f"ID: {proc['id']}, Name: {proc['name']}, Size: {proc['size_gb']}GB, Type: {proc['type']}, Has Priority: {proc['has_priority']}, VA: {proc['virtual_address']}"
+                        self.ui.add_process_to_list(process_info, idx, proc.get("is_process_stop", False))
+                    if self.process_data:
+                        self.next_process_id = max(self.next_process_id, max(int(proc['id']) for proc in self.process_data) + 1)
+            except Exception as e:
+                CustomMessageBox(self.ui.app, "Error", f"Failed to load processes from {self.proc_file_path}: {str(e)}", ["OK"])
+        else:
+            try:
+                with open(self.proc_file_path, "w") as f:
+                    json.dump([], f, indent=4)
+            except Exception as e:
+                CustomMessageBox(self.ui.app, "Error", f"Failed to create processes.json: {str(e)}", ["OK"])
         self.reorder_process_list()
 
     def save_processes_to_json(self):
-        os.makedirs(os.path.dirname(self.proc_file_path), exist_ok=True)
-        with open(self.proc_file_path, "w") as f:
-            json.dump(self.process_data, f, indent=4)
+        try:
+            with open(self.proc_file_path, "w") as f:
+                json.dump(self.process_data, f, indent=4)
+        except Exception as e:
+            CustomMessageBox(self.ui.app, "Error", f"Failed to save processes to {self.proc_file_path}: {str(e)}", ["OK"])
+        self.send_jsons_to_cpp()
+
+    def confirm_processes(self):
+        self.send_jsons_to_cpp(force_run=True)
+        dialog = CustomMessageBox(
+            self.ui.app,
+            "Success",
+            "Simulation has been triggered.",
+            ["OK"]
+        )
+        dialog.get()
 
     def generate_virtual_address(self, timestamp):
         hash_obj = hashlib.sha256(str(timestamp).encode())
@@ -318,7 +415,13 @@ class LogicHandler:
         max_physical_address = ram_size_bytes - 1
         virtual_address = virtual_address % (max_physical_address + 1)
 
-        existing_addresses = {int(proc["virtual_address"], 16) for proc in self.process_data}
+        try:
+            with open(self.proc_file_path, "r") as f:
+                processes = json.load(f)
+        except Exception:
+            processes = []
+
+        existing_addresses = {int(proc["virtual_address"], 16) for proc in processes}
         attempt = 0
         original_hash = virtual_address
         while virtual_address in existing_addresses and attempt < 1000:
@@ -352,7 +455,7 @@ class LogicHandler:
         display_name = system_process if process_type == "System" else process_name
         process_info = f"ID: {process_id}, Name: {display_name}, Size: {process_size}GB, Type: {process_type}, Has Priority: {has_priority}, VA: {virtual_address}"
 
-        self.process_data.append({
+        process_entry = {
             "id": process_id,
             "name": display_name,
             "size_gb": int(process_size),
@@ -361,31 +464,72 @@ class LogicHandler:
             "virtual_address": virtual_address,
             "is_process_stop": False,
             "timestamp": timestamp
-        })
+        }
+
+        try:
+            with open(self.proc_file_path, "r") as f:
+                self.process_data = json.load(f)
+        except Exception:
+            self.process_data = []
+
+        self.process_data.append(process_entry)
+        self.save_processes_to_json()
 
         self.ui.add_process_to_list(process_info, len(self.process_data) - 1, False)
         self.reorder_process_list()
-        self.save_processes_to_json()
-        CustomMessageBox(self.ui.app, "Success", f"Added Process: {process_info}", ["OK"])
 
         self.ui.process_name_entry.delete(0, "end")
         self.ui.process_name_entry.insert(0, "e.g., Process1")
         self.ui.process_size_entry.delete(0, "end")
         self.ui.process_size_entry.insert(0, "e.g., 1")
 
-    def update_process_ui(self, process_idx):
-        for i, (frame, idx) in enumerate(self.ui.process_list):
-            if idx == process_idx:
-                proc = self.process_data[process_idx]
+    def find_process_index(self, process_id):
+        try:
+            with open(self.proc_file_path, "r") as f:
+                processes = json.load(f)
+        except Exception:
+            return -1
+
+        for idx, proc in enumerate(processes):
+            proc_id = str(proc["id"])
+            if proc_id == process_id:
+                return idx
+        return -1
+
+    def update_process_ui(self, process_id):
+        idx = self.find_process_index(process_id)
+        if idx == -1:
+            self.reorder_process_list()
+            return
+
+        try:
+            with open(self.proc_file_path, "r") as f:
+                processes = json.load(f)
+        except Exception:
+            return
+
+        found = False
+        for frame, pid in self.ui.process_list:
+            if pid == process_id:
+                proc = processes[idx]
                 is_stopped = proc["is_process_stop"]
                 frame.button.configure(
                     text="Resume" if is_stopped else "Stop",
-                    fg_color="#66CC66" if is_stopped else "#C4A484",
-                    command=lambda: self.resume_process(frame, process_idx) if is_stopped else self.stop_process(frame, process_idx)
+                    fg_color="#66CC66" if is_stopped else "#0e19e6",
+                    command=lambda pid=process_id: self.resume_process(frame, pid) if is_stopped else self.stop_process(frame, pid)
                 )
+                found = True
                 break
+        if not found:
+            self.reorder_process_list()
 
     def reorder_process_list(self):
+        try:
+            with open(self.proc_file_path, "r") as f:
+                self.process_data = json.load(f)
+        except Exception:
+            self.process_data = []
+
         process_states = {proc["id"]: proc["is_process_stop"] for proc in self.process_data}
 
         priority_running = sorted(
@@ -404,6 +548,7 @@ class LogicHandler:
         ordered_data = priority_running + non_priority_running + stopped
 
         self.process_data = ordered_data
+        self.save_processes_to_json()
 
         for frame, _ in self.ui.process_list:
             frame.destroy()
@@ -421,36 +566,56 @@ class LogicHandler:
             process_info = f"ID: {proc['id']}, Name: {proc['name']}, Size: {proc['size_gb']}GB, Type: {proc['type']}, Has Priority: {proc['has_priority']}, VA: {proc['virtual_address']}"
             self.ui.add_process_to_list(process_info, idx, proc["is_process_stop"])
 
-    def remove_process(self, process_frame, process_idx):
-        self.process_data.pop(process_idx)
+    def remove_process(self, process_frame, process_id):
+        idx = self.find_process_index(process_id)
+        if idx == -1:
+            CustomMessageBox(self.ui.app, "Error", f"Process with ID {process_id} not found.", ["OK"])
+            return
 
-        new_process_list = []
-        for frame, idx in self.ui.process_list:
-            if idx == process_idx:
-                frame.destroy()
-                continue
-            new_idx = idx if idx < process_idx else idx - 1
-            if hasattr(frame, 'button'):
-                is_stopped = frame.button.cget("text") == "Resume"
-                frame.button.configure(
-                    command=lambda: self.stop_process(frame, new_idx) if not is_stopped else self.resume_process(frame, new_idx)
-                )
-            new_process_list.append((frame, new_idx))
-        self.ui.process_list = new_process_list
+        try:
+            with open(self.proc_file_path, "r") as f:
+                self.process_data = json.load(f)
+        except Exception:
+            return
 
-        self.reorder_process_list()
+        proc = self.process_data[idx]
+        dialog = CustomMessageBox(self.ui.app, "Confirm Removal", f"Are you sure you want to remove process {proc['name']} (ID: {proc['id']})?", ["OK", "Cancel"])
+        if dialog.get() == "OK":
+            self.process_data.pop(idx)
+            self.save_processes_to_json()
+            self.ui.remove_process(process_frame, process_id)
+            self.reorder_process_list()
+
+    def stop_process(self, process_frame, process_id):
+        idx = self.find_process_index(process_id)
+        if idx == -1:
+            CustomMessageBox(self.ui.app, "Error", f"Process with ID {process_id} not found.", ["OK"])
+            return
+
+        try:
+            with open(self.proc_file_path, "r") as f:
+                self.process_data = json.load(f)
+        except Exception:
+            return
+
+        self.process_data[idx]["is_process_stop"] = True
         self.save_processes_to_json()
-
-    def stop_process(self, process_frame, process_idx):
-        self.process_data[process_idx]["is_process_stop"] = True
-        self.update_process_ui(process_idx)
+        self.update_process_ui(process_id)
         self.reorder_process_list()
-        self.save_processes_to_json()
-        CustomMessageBox(self.ui.app, "Info", f"Process {self.process_data[process_idx]['name']} stopped", ["OK"])
 
-    def resume_process(self, process_frame, process_idx):
-        self.process_data[process_idx]["is_process_stop"] = False
-        self.update_process_ui(process_idx)
-        self.reorder_process_list()
+    def resume_process(self, process_frame, process_id):
+        idx = self.find_process_index(process_id)
+        if idx == -1:
+            CustomMessageBox(self.ui.app, "Error", f"Process with ID {process_id} not found.", ["OK"])
+            return
+
+        try:
+            with open(self.proc_file_path, "r") as f:
+                self.process_data = json.load(f)
+        except Exception:
+            return
+
+        self.process_data[idx]["is_process_stop"] = False
         self.save_processes_to_json()
-        CustomMessageBox(self.ui.app, "Info", f"Process {self.process_data[process_idx]['name']} resumed", ["OK"])
+        self.update_process_ui(process_id)
+        self.reorder_process_list()
