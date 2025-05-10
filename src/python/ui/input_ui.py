@@ -2,7 +2,7 @@ import customtkinter as ctk
 from .input_ui_constraints import LogicHandler, CustomMessageBox
 
 class VirtualMemoryUI:
-    def __init__(self, app, env_file_path=None, proc_file_path=None):
+    def __init__(self, app, env_file_path=None, proc_file_path=None, simulator_path=None, simulator_process=None):
         self.app = app
         self.app.title("Memulatrix - The Virtual Memory Simulator")
         self.app.resizable(True, True)
@@ -11,8 +11,11 @@ class VirtualMemoryUI:
         ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
 
-        # Initialize the logic handler with the provided file paths
-        self.logic_handler = LogicHandler(self, env_file_path, proc_file_path)
+        self.simulator_path = simulator_path
+        self.simulator_process = simulator_process
+
+        # Initialize the logic handler before setting up UI
+        self.logic_handler = LogicHandler(self, env_file_path, proc_file_path, simulator_path, simulator_process)
 
         # Header Frame
         self.header_frame = ctk.CTkFrame(self.app, fg_color="transparent")
@@ -53,6 +56,20 @@ class VirtualMemoryUI:
         self.rom_size_menu = ctk.CTkOptionMenu(self.ram_frame, values=rom_sizes, variable=self.rom_size_var)
         self.rom_size_menu.pack(pady=5)
 
+        ctk.CTkLabel(self.ram_frame, text="Swap Size (%):", font=("Arial", 12)).pack(anchor="w", padx=10, pady=2)
+        self.swap_percent_var = ctk.DoubleVar(value=0)
+        self.swap_slider = ctk.CTkSlider(
+            self.ram_frame,
+            from_=0,
+            to=20,
+            number_of_steps=20,
+            variable=self.swap_percent_var
+        )
+        self.swap_slider.pack(pady=5)
+        self.swap_label = ctk.CTkLabel(self.ram_frame, text=f"{self.swap_percent_var.get():.0f}%", font=("Arial", 12))
+        self.swap_label.pack(pady=2)
+        self.swap_percent_var.trace_add("write", self.update_swap_label)
+
         # Memory Frame contents
         ctk.CTkLabel(self.memory_frame, text="Memory Settings", font=("Arial", 16)).pack(pady=5)
         ctk.CTkLabel(self.memory_frame, text="Page Size (KB):", font=("Arial", 12)).pack(anchor="w", padx=10, pady=2)
@@ -75,6 +92,15 @@ class VirtualMemoryUI:
         self.va_size_var = ctk.StringVar(value="16-bit")
         self.va_size_menu = ctk.CTkOptionMenu(self.memory_frame, values=["16-bit"], variable=self.va_size_var)
         self.va_size_menu.pack(pady=5)
+
+        ctk.CTkLabel(self.memory_frame, text="Memory Allocation Type:", font=("Arial", 12)).pack(anchor="w", padx=10, pady=2)
+        self.memory_allocation_var = ctk.StringVar(value="Contiguous")
+        self.memory_allocation_menu = ctk.CTkOptionMenu(
+            self.memory_frame,
+            values=["Contiguous", "Non-Contiguous"],
+            variable=self.memory_allocation_var
+        )
+        self.memory_allocation_menu.pack(pady=5)
 
         self.config_button = ctk.CTkButton(self.memory_frame, text="Set Configuration", command=self.logic_handler.set_configuration)
         self.config_button.pack(pady=10)
@@ -142,6 +168,9 @@ class VirtualMemoryUI:
         self.logic_handler.update_options(None)
         self.app.protocol("WM_DELETE_WINDOW", self.logic_handler.on_closing)
 
+    def update_swap_label(self, *args):
+        self.swap_label.configure(text=f"{self.swap_percent_var.get():.0f}%")
+
     def toggle_theme(self):
         if ctk.get_appearance_mode() == "Light":
             ctk.set_appearance_mode("dark")
@@ -169,7 +198,6 @@ class VirtualMemoryUI:
             self.system_process_menu.configure(state="disabled")
         self.priority_checkbutton.configure(state="normal")
         self.add_process_button.configure(state="normal")
-        # Enable Confirm Processes button if there are processes
         if self.process_list:
             self.confirm_process_button.configure(state="normal")
 
@@ -185,7 +213,6 @@ class VirtualMemoryUI:
         if self.no_processes_label.winfo_exists():
             self.no_processes_label.destroy()
 
-        # Extract the process ID from the process_info string and normalize it
         process_id = process_info.split(",")[0].split(":")[1].strip()
 
         process_frame = ctk.CTkFrame(self.process_container)
@@ -215,17 +242,14 @@ class VirtualMemoryUI:
         process_frame.button = stop_resume_button
         self.process_list.append((process_frame, process_id))
 
-        # Enable the Confirm Processes button since there are now processes
         self.confirm_process_button.configure(state="normal")
 
     def remove_process(self, process_frame, process_id):
-        # Remove the process frame
         for i, (frame, pid) in enumerate(self.process_list):
             if frame == process_frame and pid == process_id:
                 frame.destroy()
                 self.process_list.pop(i)
                 break
-        # Disable the Confirm Processes button if no processes remain
         if not self.process_list:
             self.confirm_process_button.configure(state="disabled")
             if self.no_processes_label.winfo_exists():

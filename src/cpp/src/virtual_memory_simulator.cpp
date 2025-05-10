@@ -1,199 +1,193 @@
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <iostream>
-#include <fstream>
-#include <stdexcept>
 #include <vector>
 #include <set>
 #include <random>
-#include "..\include\virtual_memory_simulator.h"
+#include <string>
+#include <fstream>
+#include <sstream>
+#include <unordered_map>
+#include "../include/virtual_memory_simulator.h"
 
-// Simple TLB simulation
+#pragma comment(lib, "Ws2_32.lib")
+
+class SocketHandler {
+public:
+    SocketHandler() {
+        WSADATA wsaData;
+        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+            throw std::runtime_error("WSAStartup failed: " + std::to_string(WSAGetLastError()));
+        }
+
+        server_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (server_socket == INVALID_SOCKET) {
+            WSACleanup();
+            throw std::runtime_error("Failed to create socket: " + std::to_string(WSAGetLastError()));
+        }
+
+        int opt = 1;
+        if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(opt)) == SOCKET_ERROR) {
+            closesocket(server_socket);
+            WSACleanup();
+            throw std::runtime_error("Setsockopt failed: " + std::to_string(WSAGetLastError()));
+        }
+
+        sockaddr_in server_addr;
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        server_addr.sin_port = htons(12345);
+
+        if (bind(server_socket, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
+            closesocket(server_socket);
+            WSACleanup();
+            throw std::runtime_error("Bind failed: " + std::to_string(WSAGetLastError()));
+        }
+
+        if (listen(server_socket, 1) == SOCKET_ERROR) {
+            closesocket(server_socket);
+            WSACleanup();
+            throw std::runtime_error("Listen failed: " + std::to_string(WSAGetLastError()));
+        }
+
+        std::cout << "TCP server listening on 127.0.0.1:12345" << std::endl;
+    }
+
+    ~SocketHandler() {
+        if (client_socket != INVALID_SOCKET) {
+            closesocket(client_socket);
+        }
+        if (server_socket != INVALID_SOCKET) {
+            closesocket(server_socket);
+        }
+        WSACleanup();
+        std::cout << "Closed TCP sockets" << std::endl;
+    }
+
+    bool accept_connection() {
+        std::cout << "Waiting for client connection..." << std::endl;
+        client_socket = accept(server_socket, NULL, NULL);
+        if (client_socket == INVALID_SOCKET) {
+            std::cerr << "Accept failed: " << WSAGetLastError() << std::endl;
+            return false;
+        }
+        std::cout << "Client connected" << std::endl;
+        return true;
+    }
+
+    std::string read() {
+        char buffer[1024 * 1024];
+        int bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+        if (bytes_received == SOCKET_ERROR) {
+            int error = WSAGetLastError();
+            if (error == WSAECONNRESET || error == WSAECONNABORTED) {
+                std::cout << "Client disconnected, error: " << error << ". Waiting for new connection..." << std::endl;
+                closesocket(client_socket);
+                client_socket = INVALID_SOCKET;
+                return "";
+            }
+            std::cerr << "Read failed: " << error << std::endl;
+            return "";
+        }
+        if (bytes_received == 0) {
+            std::cout << "Client closed connection. Waiting for new connection..." << std::endl;
+            closesocket(client_socket);
+            client_socket = INVALID_SOCKET;
+            return "";
+        }
+        buffer[bytes_received] = '\0';
+        std::cout << "Received: " << std::string(buffer).substr(0, 50) << "..." << std::endl;
+        return std::string(buffer);
+    }
+
+    bool write(const std::string& data) {
+        int bytes_sent = send(client_socket, data.c_str(), data.size(), 0);
+        if (bytes_sent == SOCKET_ERROR) {
+            int error = WSAGetLastError();
+            if (error == WSAECONNRESET || error == WSAECONNABORTED) {
+                std::cout << "Client disconnected during write, error: " << error << ". Waiting for new connection..." << std::endl;
+                closesocket(client_socket);
+                client_socket = INVALID_SOCKET;
+                return false;
+            }
+            std::cerr << "Write failed: " << error << std::endl;
+            return false;
+        }
+        std::cout << "Sent: " << data.substr(0, 50) << "..." << std::endl;
+        return true;
+    }
+
+private:
+    SOCKET server_socket = INVALID_SOCKET;
+    SOCKET client_socket = INVALID_SOCKET;
+};
+
 class TLB {
 public:
     TLB(int size) : size_(size) {
-        entries_.resize(size, {0, -1}); // {virtual_address, page_number}
+        entries_.resize(size, {0, -1});
     }
-
     bool access(uint64_t virtual_address) {
-        // Check if the address is in the TLB
         for (const auto& entry : entries_) {
             if (entry.first == virtual_address) {
-                return true; // TLB hit
+                return true;
             }
         }
-        // TLB miss: Update TLB (simple FIFO replacement)
-        entries_[next_entry_] = {virtual_address, 0}; // Dummy page number
+        entries_[next_entry_] = {virtual_address, 0};
         next_entry_ = (next_entry_ + 1) % size_;
         return false;
     }
-
 private:
     int size_;
     std::vector<std::pair<uint64_t, int>> entries_;
     int next_entry_ = 0;
 };
 
-// Simple Page Table simulation
-class PageTable {
-public:
-    PageTable(uint64_t ram_size_bytes, uint64_t page_size_bytes)
-        : ram_size_bytes_(ram_size_bytes), page_size_bytes_(page_size_bytes) {
-        // Initialize page table (simplified)
-    }
+VirtualMemorySimulator::VirtualMemorySimulator(SocketHandler* handler) : socket_handler(handler), total_hits(0), total_misses(0), total_faults(0) {}
 
-    bool access(uint64_t virtual_address) {
-        uint64_t page_number = virtual_address / page_size_bytes_;
-        // Check if the page is in memory (simplified simulation)
-        if (pages_in_memory_.find(page_number) != pages_in_memory_.end()) {
-            return false; // Page hit
-        }
-        // Page fault: Add to memory (simplified)
-        pages_in_memory_.insert(page_number);
-        return true; // Page fault
-    }
+VirtualMemorySimulator::~VirtualMemorySimulator() {}
 
-private:
-    uint64_t ram_size_bytes_;
-    uint64_t page_size_bytes_;
-    std::set<uint64_t> pages_in_memory_;
-};
-
-VirtualMemorySimulator::VirtualMemorySimulator(const std::string& env_file, const std::string& proc_file)
-    : env_file_path(env_file), proc_file_path(proc_file) {
-    if (env_file_path.empty()) {
-        throw std::runtime_error("Environment file path is empty");
-    }
-    if (proc_file_path.empty()) {
-        throw std::runtime_error("Processes file path is empty");
-    }
-    load_environment_settings();
-}
-
-void VirtualMemorySimulator::load_environment_settings() {
-    std::ifstream file(env_file_path);
-    if (!file.is_open()) {
-        throw std::runtime_error("Could not open environment settings file: " + env_file_path);
-    }
-
-    // Check file size to confirm it's not empty
-    file.seekg(0, std::ios::end);
-    std::streamsize size = file.tellg();
-    file.seekg(0, std::ios::beg);
-    std::cout << "Environment file size: " << size << " bytes\n";
-    std::cout.flush();
-    if (size == 0) {
-        throw std::runtime_error("Environment settings file is empty: " + env_file_path);
-    }
-
-    json settings;
+void VirtualMemorySimulator::load_settings(const json& settings) {
     try {
-        file >> settings;
-    } catch (const json::parse_error& e) {
-        file.close();
-        throw std::runtime_error("JSON parse error in " + env_file_path + ": " + e.what());
-    }
-    file.close();
-
-    try {
-        ram_size_bytes = std::stoull(settings["ram_size_gb"].get<std::string>()) * 1024ULL * 1024 * 1024;
-        page_size_bytes = std::stoul(settings["page_size_kb"].get<std::string>()) * 1024;
-        tlb_size = std::stoul(settings["tlb_size"].get<std::string>());
+        ram_size_bytes = settings["ram_size_gb"].get<uint64_t>() * 1024ULL * 1024 * 1024;
+        page_size_bytes = settings["page_size_kb"].get<uint64_t>() * 1024;
+        tlb_size = settings["tlb_size"].get<int>();
         tlb_enabled = settings["tlb_enabled"].get<bool>();
         virtual_address_size = settings["virtual_address_size"].get<std::string>();
         rom_size = settings["rom_size"].get<std::string>();
-    } catch (const std::exception& e) {
-        throw std::runtime_error("Error parsing environment settings: " + std::string(e.what()));
-    }
+        swap_percent = settings["swap_percent"].get<int>();
+        allocation_type = settings["allocation_type"].get<std::string>();
 
-    std::cout << "=== Environment Settings Loaded ===\n"
-              << "RAM Size: " << ram_size_bytes / (1024ULL * 1024 * 1024) << " GB\n"
-              << "Page Size: " << page_size_bytes / 1024 << " KB\n"
-              << "TLB Size: " << tlb_size << "\n"
-              << "TLB Enabled: " << (tlb_enabled ? "Yes" : "No") << "\n"
-              << "Virtual Address Size: " << virtual_address_size << "\n"
-              << "ROM Size: " << rom_size << "\n"
-              << "===================================\n\n";
-    std::cout.flush();
-}
-
-std::vector<Process> VirtualMemorySimulator::load_processes() {
-    std::vector<Process> processes;
-    std::ifstream file(proc_file_path);
-    if (!file.is_open()) {
-        throw std::runtime_error("Could not open processes file: " + proc_file_path);
-    }
-
-    // Check file size to confirm it's not empty
-    file.seekg(0, std::ios::end);
-    std::streamsize size = file.tellg();
-    file.seekg(0, std::ios::beg);
-    std::cout << "Processes file size: " << size << " bytes\n";
-    std::cout.flush();
-    if (size == 0) {
-        throw std::runtime_error("Processes file is empty: " + proc_file_path);
-    }
-
-    json process_list;
-    try {
-        file >> process_list;
-    } catch (const json::parse_error& e) {
-        file.close();
-        throw std::runtime_error("JSON parse error in " + proc_file_path + ": " + e.what());
-    }
-    file.close();
-
-    for (const auto& proc_json : process_list) {
-        Process p;
-        try {
+        processes.clear();
+        for (const auto& proc_json : settings["processes"]) {
+            Process p;
             p.id = proc_json["id"].get<std::string>();
             p.name = proc_json["name"].get<std::string>();
             p.size_bytes = proc_json["size_gb"].get<int>() * 1024ULL * 1024 * 1024;
             p.type = proc_json["type"].get<std::string>();
             p.has_priority = proc_json["has_priority"].get<bool>();
             p.is_process_stop = proc_json["is_process_stop"].get<bool>();
-
-            std::string va_str = proc_json["virtual_address"].get<std::string>();
-            if (va_str.substr(0, 2) == "0x") {
-                va_str = va_str.substr(2);
-            }
-            p.virtual_address = std::stoull(va_str, nullptr, 16);
-        } catch (const std::exception& e) {
-            std::cerr << "Error parsing process ID " << (p.id.empty() ? "unknown" : p.id) << ": " << e.what() << "\n";
-            std::cerr.flush();
-            continue;
+            processes.push_back(p);
         }
-        processes.push_back(p);
-    }
 
-    return processes;
-}
-
-void VirtualMemorySimulator::print_processes(const std::vector<Process>& processes) {
-    if (processes.empty()) {
-        std::cout << "No active processes.\n";
-        return;
+        std::cout << "Settings loaded: RAM=" << ram_size_bytes / (1024ULL * 1024 * 1024) << "GB, "
+                  << "PageSize=" << page_size_bytes / 1024 << "KB, "
+                  << "TLBSize=" << tlb_size << ", "
+                  << "TLBEnabled=" << tlb_enabled << ", "
+                  << "VASize=" << virtual_address_size << ", "
+                  << "ROM=" << rom_size << ", "
+                  << "Swap=" << swap_percent << "%, "
+                  << "Allocation=" << allocation_type << "\n";
+        for (const auto& p : processes) {
+            std::cout << "Process: ID=" << p.id << ", Name=" << p.name << ", Size=" << p.size_bytes / (1024ULL * 1024 * 1024) << "GB\n";
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error parsing settings: " << e.what() << "\n";
+        throw;
     }
-
-    std::cout << "=== Active Processes ===\n";
-    for (const auto& proc : processes) {
-        std::cout << "Process ID: " << proc.id
-                  << ", Name: " << proc.name
-                  << ", Size: " << proc.size_bytes / (1024ULL * 1024 * 1024) << "GB"
-                  << ", Type: " << proc.type
-                  << ", Has Priority: " << (proc.has_priority ? "Yes" : "No")
-                  << ", Virtual Address: 0x" << std::hex << proc.virtual_address << std::dec
-                  << ", Stopped: " << (proc.is_process_stop ? "Yes" : "No")
-                  << std::endl;
-    }
-    std::cout << "========================\n\n";
-    std::cout.flush();
 }
 
 void VirtualMemorySimulator::simulate() {
-    // Load processes
-    auto processes = load_processes();
-    print_processes(processes);
-
-    // Initialize simulation state
     tlb_hits.clear();
     tlb_misses.clear();
     tlb_hit_rate.clear();
@@ -201,50 +195,115 @@ void VirtualMemorySimulator::simulate() {
     total_hits = 0;
     total_misses = 0;
     total_faults = 0;
+    page_tables.clear();
 
-    // Initialize TLB and Page Table
-    TLB tlb(tlb_size);
-    PageTable page_table(ram_size_bytes, page_size_bytes);
+    // Parse virtual address size
+    int entry_size;
+    uint64_t va_max;
+    if (virtual_address_size == "16-bit") {
+        entry_size = 2;
+        va_max = 0xFFFF;
+    } else if (virtual_address_size == "32-bit") {
+        entry_size = 4;
+        va_max = 0xFFFFFFFF;
+    } else {
+        entry_size = 8;
+        va_max = 0xFFFFFFFFFFFFFFFFULL;
+    }
 
-    // Simulation parameters
-    int simulation_duration = 100; // 100 time steps (e.g., 100ms each)
+    // Parse ROM size
+    uint64_t rom_size_bytes;
+    std::stringstream ss(rom_size);
+    double rom_gb;
+    ss >> rom_gb;
+    rom_size_bytes = static_cast<uint64_t>(rom_gb * 1024ULL * 1024 * 1024);
+
+    // Check total process size
+    uint64_t total_process_size = 0;
+    int active_processes = 0;
+    for (const auto& p : processes) {
+        if (!p.is_process_stop) {
+            total_process_size += p.size_bytes;
+            active_processes++;
+        }
+    }
+    uint64_t max_size = ram_size_bytes + (rom_size_bytes * swap_percent / 100);
+    if (total_process_size > max_size) {
+        std::cout << "Insufficient space: Total process size (" << total_process_size / (1024ULL * 1024 * 1024)
+                  << "GB) exceeds RAM (" << ram_size_bytes / (1024ULL * 1024 * 1024)
+                  << "GB) + Swap (" << (rom_size_bytes * swap_percent / 100) / (1024ULL * 1024 * 1024) << "GB)\n";
+        return;
+    }
+
+    // Determine block size
+    uint64_t block_size_bytes;
+    if (ram_size_bytes < 16ULL * 1024 * 1024 * 1024) {
+        block_size_bytes = 1ULL * 1024 * 1024;
+    } else if (ram_size_bytes < 32ULL * 1024 * 1024 * 1024) {
+        block_size_bytes = 4ULL * 1024 * 1024;
+    } else {
+        block_size_bytes = 16ULL * 1024 * 1024;
+    }
+
+    // Calculate frames and frame percentage
+    uint64_t total_frames = ram_size_bytes / page_size_bytes;
+    double frame_percent = active_processes >= 2 ? (100.0 / active_processes - 2) : 100.0;
+    if (frame_percent < 1.0) frame_percent = 1.0;
+
+    // Initialize available frames
+    std::vector<uint64_t> available_frames(total_frames);
+    for (uint64_t i = 0; i < total_frames; ++i) {
+        available_frames[i] = i;
+    }
+
+    // Create page tables
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> access_dist(0, 1); // Randomly decide to access memory
+    uint64_t current_address = 0;
+    for (const auto& p : processes) {
+        if (p.is_process_stop) continue;
+        uint64_t num_pages = (p.size_bytes + page_size_bytes - 1) / page_size_bytes;
+        PageTable pt(num_pages, page_size_bytes, entry_size, allocation_type, total_frames, ram_size_bytes, frame_percent);
+        if (!pt.allocate(block_size_bytes, available_frames, gen)) {
+            std::cout << "Allocation failed for process ID=" << p.id << ", Name=" << p.name << std::endl;
+            continue;
+        }
+        page_tables.emplace(p.id, std::make_pair(current_address, pt));
+        current_address += pt.size_bytes();
+    }
 
-    // Simulate memory accesses
+    // Simulate memory access
+    TLB tlb(tlb_size);
+    int simulation_duration = 100;
+    std::uniform_int_distribution<> access_dist(0, 1);
+    std::uniform_int_distribution<uint64_t> va_dist(0, va_max);
+
     for (int t = 0; t < simulation_duration; t++) {
-        for (const auto& proc : processes) {
-            if (proc.is_process_stop) continue; // Skip stopped processes
-
-            // Simulate a memory access (randomly decide whether to access)
+        for (const auto& p : processes) {
+            if (p.is_process_stop) continue;
             if (access_dist(gen) == 0) continue;
 
-            uint64_t virtual_address = proc.virtual_address;
-
-            // TLB access (if enabled)
+            uint64_t virtual_address = va_dist(gen) % p.size_bytes;
             if (tlb_enabled) {
                 bool hit = tlb.access(virtual_address);
                 if (hit) total_hits++;
                 else total_misses++;
             }
 
-            // Page table access
-            bool fault = page_table.access(virtual_address);
-            if (fault) total_faults++;
+            auto it = page_tables.find(p.id);
+            if (it != page_tables.end()) {
+                bool fault = it->second.second.access(virtual_address);
+                if (fault) total_faults++;
+            }
 
-            // Update time-series data
             tlb_hits.push_back({t, total_hits});
             tlb_misses.push_back({t, total_misses});
-            double hit_rate = (total_hits + total_misses) > 0
-                ? (double)total_hits / (total_hits + total_misses)
-                : 0.0;
+            double hit_rate = (total_hits + total_misses) > 0 ? (double)total_hits / (total_hits + total_misses) : 0.0;
             tlb_hit_rate.push_back({t, hit_rate});
             page_faults.push_back({t, total_faults});
         }
     }
 
-    // If TLB is disabled, set TLB stats to empty
     if (!tlb_enabled) {
         tlb_hits.clear();
         tlb_misses.clear();
@@ -257,93 +316,109 @@ void VirtualMemorySimulator::simulate() {
     }
 }
 
-void VirtualMemorySimulator::export_results(const std::string& output_path) {
+json VirtualMemorySimulator::export_results() {
     json result;
     result["tlb_stats"]["hits"] = tlb_hits;
     result["tlb_stats"]["misses"] = tlb_misses;
     result["tlb_stats"]["hit_rate"] = tlb_hit_rate;
+    result["tlb_stats"]["total_hits"] = total_hits;
+    result["tlb_stats"]["total_misses"] = total_misses;
     result["page_faults"] = page_faults;
+    result["total_faults"] = total_faults;
 
-    std::ofstream file(output_path);
-    if (!file.is_open()) {
-        throw std::runtime_error("Could not write to file: " + output_path);
+    if (ram_size_bytes == 0) {
+        result["error"] = "Insufficient space";
+    } else {
+        json pts;
+        for (const auto& pt : page_tables) {
+            json pt_entry;
+            pt_entry["process_id"] = pt.first;
+            pt_entry["base_address"] = pt.second.first;
+            pt_entry["table"] = pt.second.second.export_json();
+            pts.push_back(pt_entry);
+        }
+        result["page_tables"] = pts;
     }
-    file << result.dump(4); // Pretty-print with indentation
-    file.close();
+
+    return result;
 }
 
-int main(int argc, char* argv[]) {
-    // Check command-line arguments
-    if (argc != 3) {
-        std::cerr << "Usage: " << argv[0] << " <environment_file> <processes_file>\n";
-        std::cerr.flush();
-        return 1;
-    }
+void VirtualMemorySimulator::reset() {
+    processes.clear();
+    tlb_hits.clear();
+    tlb_misses.clear();
+    tlb_hit_rate.clear();
+    page_faults.clear();
+    page_tables.clear();
+    total_hits = 0;
+    total_misses = 0;
+    total_faults = 0;
+}
 
-    std::string env_path = argv[1];
-    std::string proc_path = argv[2];
-    const std::string result_path = "D:\\projects\\Memulatrix\\bin\\result.json";
+std::string VirtualMemorySimulator::read_socket() {
+    return socket_handler->read();
+}
 
-    std::cout << "Starting Virtual Memory Simulator...\n";
-    std::cout << "Environment file: " << env_path << "\n";
-    std::cout << "Processes file: " << proc_path << "\n";
-    std::cout.flush();
+bool VirtualMemorySimulator::write_socket(const std::string& data) {
+    return socket_handler->write(data);
+}
 
-    // Validate file existence and non-empty
-    std::ifstream env_file(env_path);
-    if (!env_file.is_open()) {
-        std::cerr << "Could not open environment file: " << env_path << "\n";
-        std::cerr.flush();
-        return 1;
-    }
-    env_file.seekg(0, std::ios::end);
-    if (env_file.tellg() == 0) {
-        std::cerr << "Environment file is empty: " << env_path << "\n";
-        std::cerr.flush();
-        env_file.close();
-        return 1;
-    }
-    env_file.close();
+bool VirtualMemorySimulator::accept_connection() {
+    return socket_handler->accept_connection();
+}
 
-    std::ifstream proc_file(proc_path);
-    if (!proc_file.is_open()) {
-        std::cerr << "Could not open processes file: " << proc_path << "\n";
-        std::cerr.flush();
-        return 1;
-    }
-    proc_file.seekg(0, std::ios::end);
-    if (proc_file.tellg() == 0) {
-        std::cerr << "Processes file is empty: " << proc_path << "\n";
-        std::cerr.flush();
-        proc_file.close();
-        return 1;
-    }
-    proc_file.close();
-
+int main() {
+    SocketHandler* socket_handler = nullptr;
     try {
-        // Initialize the simulator with the provided paths
-        VirtualMemorySimulator sim(env_path, proc_path);
+        socket_handler = new SocketHandler();
+        VirtualMemorySimulator sim(socket_handler);
 
-        // Run simulation (this will also print the processes)
-        sim.simulate();
+        while (true) {
+            if (!sim.accept_connection()) {
+                std::cerr << "Connection failed, retrying..." << std::endl;
+                Sleep(1000);
+                continue;
+            }
 
-        // Export results
-        sim.export_results(result_path);
-        std::cout << "Simulation completed, results exported to " << result_path << "\n";
-        std::cout.flush();
+            while (true) {
+                std::string config_str = sim.read_socket();
+                if (config_str.empty()) {
+                    break;
+                }
+
+                json settings;
+                try {
+                    settings = json::parse(config_str);
+                    std::cout << "Parsed JSON settings: " << settings.dump().substr(0, 50) << "..." << std::endl;
+                } catch (const json::parse_error& e) {
+                    std::cerr << "JSON parse error: " << e.what() << "\n";
+                    continue;
+                }
+
+                try {
+                    sim.load_settings(settings);
+                    sim.simulate();
+                    json result = sim.export_results();
+                    std::string result_str = result.dump();
+                    if (!sim.write_socket(result_str)) {
+                        std::cerr << "Failed to send results, client may have disconnected..." << std::endl;
+                        break;
+                    } else {
+                        std::cout << "Simulation completed and results sent" << std::endl;
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "Simulation error: " << e.what() << "\n";
+                }
+
+                sim.reset();
+            }
+        }
     } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << "\n";
-        std::cerr.flush();
-        // Write an empty result.json with error message
-        json error_result;
-        error_result["error"] = e.what();
-        std::ofstream file(result_path);
-        file << error_result.dump(4);
-        file.close();
-        std::cout << "Error result exported to " << result_path << "\n";
-        std::cout.flush();
+        std::cerr << "Fatal error: " << e.what() << "\n";
+        if (socket_handler) {
+            delete socket_handler;
+        }
         return 1;
     }
-
     return 0;
 }

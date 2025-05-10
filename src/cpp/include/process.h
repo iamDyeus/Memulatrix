@@ -9,7 +9,6 @@ struct Process {
     uint64_t size_bytes;
     std::string type;
     bool has_priority;
-    uint64_t virtual_address;
     bool is_process_stop;
 };
 

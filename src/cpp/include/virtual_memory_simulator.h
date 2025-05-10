@@ -3,41 +3,38 @@
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include "json.hpp"
+#include "process.h"
+#include "page_table.h"
 
-// Using nlohmann::json as the json type (assumed from your code)
 using json = nlohmann::json;
 
-struct Process {
-    std::string id;
-    std::string name;
-    uint64_t size_bytes;
-    std::string type;
-    bool has_priority;
-    bool is_process_stop;
-    uint64_t virtual_address;
-};
+class SocketHandler;
 
 class VirtualMemorySimulator {
 public:
-    VirtualMemorySimulator(const std::string& env_file, const std::string& proc_file);
-
-    void load_environment_settings();
-    std::vector<Process> load_processes();
-    void print_processes(const std::vector<Process>& processes);
+    VirtualMemorySimulator(SocketHandler* handler);
+    ~VirtualMemorySimulator();
+    void load_settings(const json& settings);
     void simulate();
-    void export_results(const std::string& output_path);
-    static bool wait_for_trigger(); // Changed to static
+    json export_results();
+    void reset();
+    std::string read_socket();
+    bool write_socket(const std::string& data);
+    bool accept_connection();
 
-    // Member variables (assumed from your code)
-    std::string env_file_path;
-    std::string proc_file_path;
+private:
+    SocketHandler* socket_handler;
     uint64_t ram_size_bytes;
     uint64_t page_size_bytes;
     int tlb_size;
     bool tlb_enabled;
     std::string virtual_address_size;
     std::string rom_size;
+    int swap_percent;
+    std::string allocation_type;
+    std::vector<Process> processes;
     std::vector<std::pair<int, int>> tlb_hits;
     std::vector<std::pair<int, int>> tlb_misses;
     std::vector<std::pair<int, double>> tlb_hit_rate;
@@ -45,6 +42,7 @@ public:
     int total_hits;
     int total_misses;
     int total_faults;
+    std::unordered_map<std::string, std::pair<uint64_t, PageTable>> page_tables;
 };
 
-#endif // VIRTUAL_MEMORY_SIMULATOR_H
+#endif
