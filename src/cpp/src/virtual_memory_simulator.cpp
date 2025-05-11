@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+#include <iomanip>
 #include "../include/virtual_memory_simulator.h"
 
 #pragma comment(lib, "Ws2_32.lib")
@@ -332,37 +333,53 @@ void VirtualMemorySimulator::simulate() {
     std::mt19937 gen(rd());
     uint64_t current_address = 0;
     for (const auto& p : processes) {
-        if (p.is_process_stop) continue;
+        if (p.is_process_stop) {
+            debug << "Process " << p.id << ": Skipped (stopped)\n";
+            continue;
+        }
         uint64_t num_pages = (p.size_bytes + page_size_bytes - 1) / page_size_bytes;
+        debug << "Process " << p.id << ": Creating page table for " << num_pages << " pages\n";
         PageTable pt(num_pages, page_size_bytes, entry_size, allocation_type, total_frames, ram_size_bytes, frame_percent, p.id);
         if (!pt.allocate(block_size_bytes, available_frames, gen)) {
-            debug << "Allocation failed for process ID=" << p.id << ", Name=" << p.name << "\n";
-            std::cout << "Allocation failed for process ID=" << p.id << ", Name=" << p.name << "\n";
+            debug << "Process " << p.id << ": Allocation failed, Name=" << p.name << "\n";
+            std::cout << "Process " << p.id << ": Allocation failed, Name=" << p.name << "\n";
             continue;
         }
         page_tables.emplace(p.id, std::make_pair(current_address, pt));
         current_address += pt.size_bytes();
+        debug << "Process " << p.id << ": Page table allocated, base address=0x" 
+              << std::hex << current_address << std::dec << "\n";
 
         // Demonstrate lookup for a sample page (e.g., page 1)
-        uint64_t sample_page = 1; // Can be changed to any valid page (e.g., 2050 for large processes)
+        uint64_t sample_page = 1;
         if (num_pages >= sample_page) {
             lookup(p.id, sample_page);
         }
     }
 
-    // Log page tables for active processes
-    debug << "Page tables for active processes:\n";
+    // Log page tables for all active processes in tabular format
+    debug << "Page tables for all active processes:\n";
     for (const auto& p : processes) {
         if (p.is_process_stop) continue;
         auto it = page_tables.find(p.id);
         if (it != page_tables.end()) {
             json pt_json = it->second.second.export_json();
-            debug << "Process ID=" << p.id << ", Name=" << p.name << ":\n";
+            debug << "Process ID=" << p.id << ", Name=" << p.name << ", Levels=" 
+                  << it->second.second.get_levels() << ":\n";
+            // Table header
+            debug << "| " << std::left << std::setw(12) << "Virtual Page" 
+                  << " | " << std::setw(14) << "Physical Frame" 
+                  << " | " << std::setw(8) << "In RAM" << " |\n";
+            debug << "| " << std::string(12, '-') << " | " << std::string(14, '-') 
+                  << " | " << std::string(8, '-') << " |\n";
+            // Table rows
             for (const auto& entry : pt_json) {
-                debug << "  Virtual Page=" << entry["virtual_page"].get<uint64_t>()
-                      << ", Physical Frame=" << entry["physical_frame"].get<std::string>()
-                      << ", In RAM=" << entry["in_ram"].get<bool>() << "\n";
+                debug << "| " << std::right << std::setw(12) << entry["virtual_page"].get<uint64_t>()
+                      << " | " << std::left << std::setw(14) << entry["physical_frame"].get<std::string>()
+                      << " | " << std::setw(8) << (entry["in_ram"].get<bool>() ? "1" : "0") << " |\n";
             }
+        } else {
+            debug << "Process ID=" << p.id << ", Name=" << p.name << ": No page table allocated\n";
         }
     }
 

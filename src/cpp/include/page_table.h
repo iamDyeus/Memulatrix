@@ -20,7 +20,8 @@ public:
     bool access(uint64_t virtual_address);
     json export_json() const;
     uint64_t size_bytes() const;
-    uint64_t lookup(uint64_t page_number) const; // 1-based page number
+    uint64_t lookup(uint64_t page_number) const;
+    int get_levels() const; // New method to get number of levels
 
 private:
     int calculate_levels();
@@ -41,10 +42,10 @@ private:
     int bits_per_level_;
     uint64_t entries_per_table_;
     std::string process_id_;
-    std::unordered_map<uint64_t, std::string> ram_; // Frame to purpose (e.g., "page_1", "table_0")
-    std::unordered_map<uint64_t, uint64_t> entries_; // Page (1-based) to frame
+    std::unordered_map<uint64_t, std::string> ram_;
+    std::unordered_map<uint64_t, uint64_t> entries_;
     std::vector<std::pair<uint64_t, bool>> single_level_table_;
-    std::vector<std::pair<uint64_t, bool>> top_level_table_; // Frame number, valid
+    std::vector<std::pair<uint64_t, bool>> top_level_table_;
     std::vector<std::vector<std::pair<uint64_t, bool>>*> second_level_tables_;
     std::vector<std::vector<std::pair<uint64_t, bool>>*> third_level_tables_;
     std::vector<std::vector<std::pair<uint64_t, bool>>*> fourth_level_tables_;
