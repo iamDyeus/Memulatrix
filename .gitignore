@@ -49,3 +49,6 @@ db.sqlite3
 
 #bin folder
 bin/
+
+#debug file
+debug.txt

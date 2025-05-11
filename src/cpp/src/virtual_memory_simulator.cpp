@@ -50,6 +50,10 @@ public:
             throw std::runtime_error("Listen failed: " + std::to_string(WSAGetLastError()));
         }
 
+        std::ofstream debug("debug.txt", std::ios::app);
+        debug << "TCP server initialized on 127.0.0.1:12345\n";
+        debug.close();
+
         std::cout << "TCP server listening on 127.0.0.1:12345" << std::endl;
     }
 
@@ -61,6 +65,9 @@ public:
             closesocket(server_socket);
         }
         WSACleanup();
+        std::ofstream debug("debug.txt", std::ios::app);
+        debug << "Closed TCP sockets\n";
+        debug.close();
         std::cout << "Closed TCP sockets" << std::endl;
     }
 
@@ -69,8 +76,14 @@ public:
         client_socket = accept(server_socket, NULL, NULL);
         if (client_socket == INVALID_SOCKET) {
             std::cerr << "Accept failed: " << WSAGetLastError() << std::endl;
+            std::ofstream debug("debug.txt", std::ios::app);
+            debug << "Accept failed: " << WSAGetLastError() << "\n";
+            debug.close();
             return false;
         }
+        std::ofstream debug("debug.txt", std::ios::app);
+        debug << "Client connected\n";
+        debug.close();
         std::cout << "Client connected" << std::endl;
         return true;
     }
@@ -80,6 +93,9 @@ public:
         int bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
         if (bytes_received == SOCKET_ERROR) {
             int error = WSAGetLastError();
+            std::ofstream debug("debug.txt", std::ios::app);
+            debug << "Read failed: " << error << "\n";
+            debug.close();
             if (error == WSAECONNRESET || error == WSAECONNABORTED) {
                 std::cout << "Client disconnected, error: " << error << ". Waiting for new connection..." << std::endl;
                 closesocket(client_socket);
@@ -90,12 +106,18 @@ public:
             return "";
         }
         if (bytes_received == 0) {
+            std::ofstream debug("debug.txt", std::ios::app);
+            debug << "Client closed connection\n";
+            debug.close();
             std::cout << "Client closed connection. Waiting for new connection..." << std::endl;
             closesocket(client_socket);
             client_socket = INVALID_SOCKET;
             return "";
         }
         buffer[bytes_received] = '\0';
+        std::ofstream debug("debug.txt", std::ios::app);
+        debug << "Received: " << std::string(buffer).substr(0, 50) << "...\n";
+        debug.close();
         std::cout << "Received: " << std::string(buffer).substr(0, 50) << "..." << std::endl;
         return std::string(buffer);
     }
@@ -104,6 +126,9 @@ public:
         int bytes_sent = send(client_socket, data.c_str(), data.size(), 0);
         if (bytes_sent == SOCKET_ERROR) {
             int error = WSAGetLastError();
+            std::ofstream debug("debug.txt", std::ios::app);
+            debug << "Write failed: " << error << "\n";
+            debug.close();
             if (error == WSAECONNRESET || error == WSAECONNABORTED) {
                 std::cout << "Client disconnected during write, error: " << error << ". Waiting for new connection..." << std::endl;
                 closesocket(client_socket);
@@ -113,6 +138,9 @@ public:
             std::cerr << "Write failed: " << error << std::endl;
             return false;
         }
+        std::ofstream debug("debug.txt", std::ios::app);
+        debug << "Sent: " << data.substr(0, 50) << "...\n";
+        debug.close();
         std::cout << "Sent: " << data.substr(0, 50) << "..." << std::endl;
         return true;
     }
@@ -128,12 +156,18 @@ public:
         entries_.resize(size, {0, -1});
     }
     bool access(uint64_t virtual_address) {
+        std::ofstream debug("debug.txt", std::ios::app);
         for (const auto& entry : entries_) {
             if (entry.first == virtual_address) {
+                debug << "TLB: Hit for virtual address 0x" << std::hex << virtual_address << "\n";
+                debug.close();
                 return true;
             }
         }
         entries_[next_entry_] = {virtual_address, 0};
+        debug << "TLB: Miss for virtual address 0x" << std::hex << virtual_address 
+              << ", added to entry " << next_entry_ << "\n";
+        debug.close();
         next_entry_ = (next_entry_ + 1) % size_;
         return false;
     }
@@ -143,9 +177,17 @@ private:
     int next_entry_ = 0;
 };
 
-VirtualMemorySimulator::VirtualMemorySimulator(SocketHandler* handler) : socket_handler(handler), total_hits(0), total_misses(0), total_faults(0) {}
+VirtualMemorySimulator::VirtualMemorySimulator(SocketHandler* handler) : socket_handler(handler), total_hits(0), total_misses(0), total_faults(0) {
+    std::ofstream debug("debug.txt", std::ios::out);
+    debug << "Virtual Memory Simulator initialized\n";
+    debug.close();
+}
 
-VirtualMemorySimulator::~VirtualMemorySimulator() {}
+VirtualMemorySimulator::~VirtualMemorySimulator() {
+    std::ofstream debug("debug.txt", std::ios::app);
+    debug << "Virtual Memory Simulator destroyed\n";
+    debug.close();
+}
 
 void VirtualMemorySimulator::load_settings(const json& settings) {
     try {
@@ -170,6 +212,23 @@ void VirtualMemorySimulator::load_settings(const json& settings) {
             processes.push_back(p);
         }
 
+        std::ofstream debug("debug.txt", std::ios::app);
+        debug << "Settings loaded: RAM=" << ram_size_bytes / (1024ULL * 1024 * 1024) << "GB, "
+              << "PageSize=" << page_size_bytes / 1024 << "KB, "
+              << "TLBSize=" << tlb_size << ", "
+              << "TLBEnabled=" << tlb_enabled << ", "
+              << "VASize=" << virtual_address_size << ", "
+              << "ROM=" << rom_size << ", "
+              << "Swap=" << swap_percent << "%, "
+              << "Allocation=" << allocation_type << "\n";
+        for (const auto& p : processes) {
+            debug << "Process: ID=" << p.id << ", Name=" << p.name << ", Size=" 
+                  << p.size_bytes / (1024ULL * 1024 * 1024) << "GB, "
+                  << "Type=" << p.type << ", Priority=" << p.has_priority 
+                  << ", Stopped=" << p.is_process_stop << "\n";
+        }
+        debug.close();
+
         std::cout << "Settings loaded: RAM=" << ram_size_bytes / (1024ULL * 1024 * 1024) << "GB, "
                   << "PageSize=" << page_size_bytes / 1024 << "KB, "
                   << "TLBSize=" << tlb_size << ", "
@@ -179,15 +238,21 @@ void VirtualMemorySimulator::load_settings(const json& settings) {
                   << "Swap=" << swap_percent << "%, "
                   << "Allocation=" << allocation_type << "\n";
         for (const auto& p : processes) {
-            std::cout << "Process: ID=" << p.id << ", Name=" << p.name << ", Size=" << p.size_bytes / (1024ULL * 1024 * 1024) << "GB\n";
+            std::cout << "Process: ID=" << p.id << ", Name=" << p.name << ", Size=" 
+                      << p.size_bytes / (1024ULL * 1024 * 1024) << "GB\n";
         }
     } catch (const std::exception& e) {
+        std::ofstream debug("debug.txt", std::ios::app);
+        debug << "Error parsing settings: " << e.what() << "\n";
+        debug.close();
         std::cerr << "Error parsing settings: " << e.what() << "\n";
         throw;
     }
 }
 
 void VirtualMemorySimulator::simulate() {
+    std::ofstream debug("debug.txt", std::ios::app);
+    
     tlb_hits.clear();
     tlb_misses.clear();
     tlb_hit_rate.clear();
@@ -196,6 +261,8 @@ void VirtualMemorySimulator::simulate() {
     total_misses = 0;
     total_faults = 0;
     page_tables.clear();
+
+    debug << "Starting simulation\n";
 
     // Parse virtual address size
     int entry_size;
@@ -229,6 +296,10 @@ void VirtualMemorySimulator::simulate() {
     }
     uint64_t max_size = ram_size_bytes + (rom_size_bytes * swap_percent / 100);
     if (total_process_size > max_size) {
+        debug << "Insufficient space: Total process size (" << total_process_size / (1024ULL * 1024 * 1024)
+              << "GB) exceeds RAM (" << ram_size_bytes / (1024ULL * 1024 * 1024)
+              << "GB) + Swap (" << (rom_size_bytes * swap_percent / 100) / (1024ULL * 1024 * 1024) << "GB)\n";
+        debug.close();
         std::cout << "Insufficient space: Total process size (" << total_process_size / (1024ULL * 1024 * 1024)
                   << "GB) exceeds RAM (" << ram_size_bytes / (1024ULL * 1024 * 1024)
                   << "GB) + Swap (" << (rom_size_bytes * swap_percent / 100) / (1024ULL * 1024 * 1024) << "GB)\n";
@@ -263,13 +334,36 @@ void VirtualMemorySimulator::simulate() {
     for (const auto& p : processes) {
         if (p.is_process_stop) continue;
         uint64_t num_pages = (p.size_bytes + page_size_bytes - 1) / page_size_bytes;
-        PageTable pt(num_pages, page_size_bytes, entry_size, allocation_type, total_frames, ram_size_bytes, frame_percent);
+        PageTable pt(num_pages, page_size_bytes, entry_size, allocation_type, total_frames, ram_size_bytes, frame_percent, p.id);
         if (!pt.allocate(block_size_bytes, available_frames, gen)) {
-            std::cout << "Allocation failed for process ID=" << p.id << ", Name=" << p.name << std::endl;
+            debug << "Allocation failed for process ID=" << p.id << ", Name=" << p.name << "\n";
+            std::cout << "Allocation failed for process ID=" << p.id << ", Name=" << p.name << "\n";
             continue;
         }
         page_tables.emplace(p.id, std::make_pair(current_address, pt));
         current_address += pt.size_bytes();
+
+        // Demonstrate lookup for a sample page (e.g., page 1)
+        uint64_t sample_page = 1; // Can be changed to any valid page (e.g., 2050 for large processes)
+        if (num_pages >= sample_page) {
+            lookup(p.id, sample_page);
+        }
+    }
+
+    // Log page tables for active processes
+    debug << "Page tables for active processes:\n";
+    for (const auto& p : processes) {
+        if (p.is_process_stop) continue;
+        auto it = page_tables.find(p.id);
+        if (it != page_tables.end()) {
+            json pt_json = it->second.second.export_json();
+            debug << "Process ID=" << p.id << ", Name=" << p.name << ":\n";
+            for (const auto& entry : pt_json) {
+                debug << "  Virtual Page=" << entry["virtual_page"].get<uint64_t>()
+                      << ", Physical Frame=" << entry["physical_frame"].get<std::string>()
+                      << ", In RAM=" << entry["in_ram"].get<bool>() << "\n";
+            }
+        }
     }
 
     // Simulate memory access
@@ -314,6 +408,10 @@ void VirtualMemorySimulator::simulate() {
             tlb_hit_rate.push_back({t, 0.0});
         }
     }
+
+    debug << "Simulation completed: Total TLB Hits=" << total_hits << ", Total TLB Misses=" << total_misses 
+          << ", Total Page Faults=" << total_faults << "\n";
+    debug.close();
 }
 
 json VirtualMemorySimulator::export_results() {
@@ -340,6 +438,10 @@ json VirtualMemorySimulator::export_results() {
         result["page_tables"] = pts;
     }
 
+    std::ofstream debug("debug.txt", std::ios::app);
+    debug << "Exporting results: " << result.dump().substr(0, 50) << "...\n";
+    debug.close();
+
     return result;
 }
 
@@ -353,6 +455,10 @@ void VirtualMemorySimulator::reset() {
     total_hits = 0;
     total_misses = 0;
     total_faults = 0;
+
+    std::ofstream debug("debug.txt", std::ios::app);
+    debug << "Simulator reset\n";
+    debug.close();
 }
 
 std::string VirtualMemorySimulator::read_socket() {
@@ -367,7 +473,23 @@ bool VirtualMemorySimulator::accept_connection() {
     return socket_handler->accept_connection();
 }
 
+void VirtualMemorySimulator::lookup(const std::string& process_id, uint64_t page_number) {
+    auto it = page_tables.find(process_id);
+    if (it != page_tables.end()) {
+        it->second.second.lookup(page_number);
+    } else {
+        std::ofstream debug("debug.txt", std::ios::app);
+        debug << "Process " << process_id << ": Not found for lookup\n";
+        debug.close();
+        std::cout << "Process " << process_id << ": Not found for lookup\n";
+    }
+}
+
 int main() {
+    std::ofstream debug("debug.txt", std::ios::out);
+    debug << "Starting Virtual Memory Simulator\n";
+    debug.close();
+
     SocketHandler* socket_handler = nullptr;
     try {
         socket_handler = new SocketHandler();
@@ -389,8 +511,14 @@ int main() {
                 json settings;
                 try {
                     settings = json::parse(config_str);
+                    std::ofstream debug("debug.txt", std::ios::app);
+                    debug << "Parsed JSON settings: " << settings.dump().substr(0, 50) << "...\n";
+                    debug.close();
                     std::cout << "Parsed JSON settings: " << settings.dump().substr(0, 50) << "..." << std::endl;
                 } catch (const json::parse_error& e) {
+                    std::ofstream debug("debug.txt", std::ios::app);
+                    debug << "JSON parse error: " << e.what() << "\n";
+                    debug.close();
                     std::cerr << "JSON parse error: " << e.what() << "\n";
                     continue;
                 }
@@ -401,12 +529,21 @@ int main() {
                     json result = sim.export_results();
                     std::string result_str = result.dump();
                     if (!sim.write_socket(result_str)) {
+                        std::ofstream debug("debug.txt", std::ios::app);
+                        debug << "Failed to send results, client may have disconnected\n";
+                        debug.close();
                         std::cerr << "Failed to send results, client may have disconnected..." << std::endl;
                         break;
                     } else {
+                        std::ofstream debug("debug.txt", std::ios::app);
+                        debug << "Simulation completed and results sent\n";
+                        debug.close();
                         std::cout << "Simulation completed and results sent" << std::endl;
                     }
                 } catch (const std::exception& e) {
+                    std::ofstream debug("debug.txt", std::ios::app);
+                    debug << "Simulation error: " << e.what() << "\n";
+                    debug.close();
                     std::cerr << "Simulation error: " << e.what() << "\n";
                 }
 
@@ -414,6 +551,9 @@ int main() {
             }
         }
     } catch (const std::exception& e) {
+        std::ofstream debug("debug.txt", std::ios::app);
+        debug << "Fatal error: " << e.what() << "\n";
+        debug.close();
         std::cerr << "Fatal error: " << e.what() << "\n";
         if (socket_handler) {
             delete socket_handler;

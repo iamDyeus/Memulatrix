@@ -23,6 +23,7 @@ public:
     std::string read_socket();
     bool write_socket(const std::string& data);
     bool accept_connection();
+    void lookup(const std::string& process_id, uint64_t page_number); // New method
 
 private:
     SocketHandler* socket_handler;
