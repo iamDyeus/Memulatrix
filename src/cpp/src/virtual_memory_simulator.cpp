@@ -295,17 +295,75 @@ void VirtualMemorySimulator::simulate() {
             active_processes++;
         }
     }
-    uint64_t max_size = ram_size_bytes + (rom_size_bytes * swap_percent / 100);
+    uint64_t swap_size_bytes = swap_percent > 0 ? (rom_size_bytes * swap_percent / 100) : 0;
+    uint64_t total_swap_frames = swap_percent > 0 ? swap_size_bytes / page_size_bytes : 0;
+    uint64_t effective_ram = ram_size_bytes * 0.99;
+    uint64_t max_size = effective_ram + swap_size_bytes;
     if (total_process_size > max_size) {
         debug << "Insufficient space: Total process size (" << total_process_size / (1024ULL * 1024 * 1024)
-              << "GB) exceeds RAM (" << ram_size_bytes / (1024ULL * 1024 * 1024)
-              << "GB) + Swap (" << (rom_size_bytes * swap_percent / 100) / (1024ULL * 1024 * 1024) << "GB)\n";
+              << "GB) exceeds effective RAM (" << effective_ram / (1024ULL * 1024 * 1024)
+              << "GB) + Swap (" << swap_size_bytes / (1024ULL * 1024 * 1024) << "GB)\n";
         debug.close();
         std::cout << "Insufficient space: Total process size (" << total_process_size / (1024ULL * 1024 * 1024)
-                  << "GB) exceeds RAM (" << ram_size_bytes / (1024ULL * 1024 * 1024)
-                  << "GB) + Swap (" << (rom_size_bytes * swap_percent / 100) / (1024ULL * 1024 * 1024) << "GB)\n";
+                  << "GB) exceeds effective RAM (" << effective_ram / (1024ULL * 1024 * 1024)
+                  << "GB) + Swap (" << swap_size_bytes / (1024ULL * 1024 * 1024) << "GB)\n";
         return;
     }
+
+    // Initialize available RAM and swap frames
+    uint64_t total_frames = ram_size_bytes / page_size_bytes;
+    uint64_t effective_frames = static_cast<uint64_t>(total_frames * 0.99);
+    uint64_t table_frame_limit = static_cast<uint64_t>(ceil(total_frames * 0.01));
+    debug << "Effective RAM: " << effective_ram / (1024ULL * 1024 * 1024) << " GB, "
+          << "Effective frames: " << effective_frames << "\n";
+
+    std::vector<uint64_t> available_frames;
+    std::vector<uint64_t> available_table_frames(table_frame_limit);
+    for (uint64_t i = 0; i < table_frame_limit; ++i) {
+        available_table_frames[i] = i;
+    }
+    if (allocation_type == "Contiguous") {
+        uint64_t start_frame = table_frame_limit;
+        for (uint64_t i = start_frame; i < total_frames; ++i) {
+            available_frames.push_back(i);
+        }
+    } else {
+        for (uint64_t i = table_frame_limit; i < total_frames; ++i) {
+            available_frames.push_back(i);
+        }
+    }
+    std::vector<uint64_t> available_swap_frames;
+    if (swap_percent > 0) {
+        available_swap_frames.resize(total_swap_frames);
+        for (uint64_t i = 0; i < total_swap_frames; ++i) {
+            available_swap_frames[i] = i;
+        }
+    }
+    debug << "Total RAM frames: " << total_frames << ", Effective frames: " << effective_frames 
+          << ", Table frames: " << table_frame_limit << ", Swap frames: " << total_swap_frames << "\n";
+
+    // Check page table size
+    uint64_t total_table_size = 0;
+    for (const auto& p : processes) {
+        if (p.is_process_stop) continue;
+        uint64_t num_pages = (p.size_bytes + page_size_bytes - 1) / page_size_bytes;
+        int levels = std::max(1, static_cast<int>(ceil(log2(num_pages) / log2(page_size_bytes / entry_size))));
+        uint64_t table_size = num_pages * entry_size;
+        if (levels > 1) {
+            uint64_t entries_per_table = page_size_bytes / entry_size;
+            table_size += entries_per_table * entry_size;
+            if (levels > 2) table_size += entries_per_table * entries_per_table * entry_size;
+        }
+        debug << "Process " << p.id << ": Page table size = " << table_size / 1024.0 << " KB\n";
+        total_table_size += table_size;
+    }
+    if (total_table_size > ram_size_bytes / 100) {
+        debug << "Error: Page table size (" << total_table_size / 1024.0 << " KB) exceeds 1% of RAM\n";
+        debug.close();
+        std::cout << "Error: Page table size exceeds 1% of RAM\n";
+        return;
+    }
+    debug << "Total page table size for all processes = " << total_table_size / 1024.0 << " KB\n";
 
     // Determine block size
     uint64_t block_size_bytes;
@@ -317,16 +375,9 @@ void VirtualMemorySimulator::simulate() {
         block_size_bytes = 16ULL * 1024 * 1024;
     }
 
-    // Calculate frames and frame percentage
-    uint64_t total_frames = ram_size_bytes / page_size_bytes;
+    // Calculate frame percentage
     double frame_percent = active_processes >= 2 ? (100.0 / active_processes - 2) : 100.0;
     if (frame_percent < 1.0) frame_percent = 1.0;
-
-    // Initialize available frames
-    std::vector<uint64_t> available_frames(total_frames);
-    for (uint64_t i = 0; i < total_frames; ++i) {
-        available_frames[i] = i;
-    }
 
     // Create page tables
     std::random_device rd;
@@ -339,8 +390,8 @@ void VirtualMemorySimulator::simulate() {
         }
         uint64_t num_pages = (p.size_bytes + page_size_bytes - 1) / page_size_bytes;
         debug << "Process " << p.id << ": Creating page table for " << num_pages << " pages\n";
-        PageTable pt(num_pages, page_size_bytes, entry_size, allocation_type, total_frames, ram_size_bytes, frame_percent, p.id);
-        if (!pt.allocate(block_size_bytes, available_frames, gen)) {
+        PageTable pt(num_pages, page_size_bytes, entry_size, allocation_type, total_frames, total_frames, ram_size_bytes, frame_percent, p.id);
+        if (!pt.allocate(block_size_bytes, available_frames, available_table_frames, gen, available_swap_frames)) {
             debug << "Process " << p.id << ": Allocation failed, Name=" << p.name << "\n";
             std::cout << "Process " << p.id << ": Allocation failed, Name=" << p.name << "\n";
             continue;
@@ -500,6 +551,17 @@ void VirtualMemorySimulator::lookup(const std::string& process_id, uint64_t page
         debug.close();
         std::cout << "Process " << process_id << ": Not found for lookup\n";
     }
+}
+
+uint64_t VirtualMemorySimulator::get_frame_number(const std::string& pid, uint64_t page_number) {
+    auto it = page_tables.find(pid);
+    if (it == page_tables.end()) {
+        std::ofstream debug("debug.txt", std::ios::app);
+        debug << "Invalid process ID: " << pid << "\n";
+        debug.close();
+        return UINT64_MAX;
+    }
+    return it->second.second.lookup(page_number);
 }
 
 int main() {
