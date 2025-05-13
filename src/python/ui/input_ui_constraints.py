@@ -339,13 +339,8 @@ class LogicHandler:
         self.ui.tlb_size_menu.configure(state="normal" if tlb_options else "disabled")
         self.ui.tlb_size_var.set(tlb_options[0] if tlb_options else "")
 
-        va_size_options = []
-        if ram_size_gb < 16:
-            va_size_options = ["16-bit"]
-        elif ram_size_gb < 32:
-            va_size_options = ["16-bit", "32-bit"]
-        else:
-            va_size_options = ["16-bit", "32-bit", "64-bit"]
+        va_size_options = ["16-bit", "32-bit", "64-bit"]
+
         self.ui.va_size_menu.configure(values=va_size_options)
         self.ui.va_size_menu.configure(state="normal" if va_size_options else "disabled")
         self.ui.va_size_var.set(va_size_options[0] if va_size_options else "")
