@@ -265,7 +265,6 @@ void VirtualMemorySimulator::simulate() {
 
     debug << "Starting simulation\n";
 
-    // Parse virtual address size
     int entry_size;
     uint64_t va_max;
     if (virtual_address_size == "16-bit") {
@@ -279,14 +278,12 @@ void VirtualMemorySimulator::simulate() {
         va_max = 0xFFFFFFFFFFFFFFFFULL;
     }
 
-    // Parse ROM size
     uint64_t rom_size_bytes;
     std::stringstream ss(rom_size);
     double rom_gb;
     ss >> rom_gb;
     rom_size_bytes = static_cast<uint64_t>(rom_gb * 1024ULL * 1024 * 1024);
 
-    // Check total process size
     uint64_t total_process_size = 0;
     int active_processes = 0;
     for (const auto& p : processes) {
@@ -310,11 +307,11 @@ void VirtualMemorySimulator::simulate() {
         return;
     }
 
-    // Initialize available RAM and swap frames
     uint64_t total_frames = ram_size_bytes / page_size_bytes;
     uint64_t effective_frames = static_cast<uint64_t>(total_frames * 0.99);
     uint64_t table_frame_limit = static_cast<uint64_t>(ceil(total_frames * 0.01));
-    debug << "Effective RAM: " << effective_ram / (1024ULL * 1024 * 1024) << " GB, "
+    debug << std::fixed << std::setprecision(2);
+    debug << "Effective RAM: " << effective_ram / (1024.0 * 1024 * 1024) << " GB, "
           << "Effective frames: " << effective_frames << "\n";
 
     std::vector<uint64_t> available_frames;
@@ -342,7 +339,6 @@ void VirtualMemorySimulator::simulate() {
     debug << "Total RAM frames: " << total_frames << ", Effective frames: " << effective_frames 
           << ", Table frames: " << table_frame_limit << ", Swap frames: " << total_swap_frames << "\n";
 
-    // Check page table size
     uint64_t total_table_size = 0;
     for (const auto& p : processes) {
         if (p.is_process_stop) continue;
@@ -365,7 +361,6 @@ void VirtualMemorySimulator::simulate() {
     }
     debug << "Total page table size for all processes = " << total_table_size / 1024.0 << " KB\n";
 
-    // Determine block size
     uint64_t block_size_bytes;
     if (ram_size_bytes < 16ULL * 1024 * 1024 * 1024) {
         block_size_bytes = 1ULL * 1024 * 1024;
@@ -375,14 +370,11 @@ void VirtualMemorySimulator::simulate() {
         block_size_bytes = 16ULL * 1024 * 1024;
     }
 
-    // Calculate frame percentage
     double frame_percent = active_processes >= 2 ? (100.0 / active_processes - 2) : 100.0;
     if (frame_percent < 1.0) frame_percent = 1.0;
 
-    // Create page tables
     std::random_device rd;
     std::mt19937 gen(rd());
-    uint64_t current_address = 0;
     for (const auto& p : processes) {
         if (p.is_process_stop) {
             debug << "Process " << p.id << ": Skipped (stopped)\n";
@@ -390,43 +382,42 @@ void VirtualMemorySimulator::simulate() {
         }
         uint64_t num_pages = (p.size_bytes + page_size_bytes - 1) / page_size_bytes;
         debug << "Process " << p.id << ": Creating page table for " << num_pages << " pages\n";
-        PageTable pt(num_pages, page_size_bytes, entry_size, allocation_type, total_frames, total_frames, ram_size_bytes, frame_percent, p.id);
+        PageTable pt(num_pages, page_size_bytes, entry_size, allocation_type, total_frames, total_frames, ram_size_bytes, frame_percent, p.id, virtual_address_size);
         if (!pt.allocate(block_size_bytes, available_frames, available_table_frames, gen, available_swap_frames)) {
             debug << "Process " << p.id << ": Allocation failed, Name=" << p.name << "\n";
             std::cout << "Process " << p.id << ": Allocation failed, Name=" << p.name << "\n";
             continue;
         }
-        page_tables.emplace(p.id, std::make_pair(current_address, pt));
-        current_address += pt.size_bytes();
+        uint64_t top_level_frame = pt.get_top_level_frame(); // Get frame after allocation
+        page_tables.emplace(p.id, std::make_pair(top_level_frame, pt));
         debug << "Process " << p.id << ": Page table allocated, base address=0x" 
-              << std::hex << current_address << std::dec << "\n";
+              << std::hex << top_level_frame << std::dec << "\n";
 
-        // Demonstrate lookup for a sample page (e.g., page 1)
         uint64_t sample_page = 1;
         if (num_pages >= sample_page) {
             lookup(p.id, sample_page);
         }
     }
 
-    // Log page tables for all active processes in tabular format
     debug << "Page tables for all active processes:\n";
+    debug << "| " << std::left << std::setw(12) << "Process ID" 
+          << " | " << std::setw(12) << "Page Number" 
+          << " | " << std::setw(18) << "Virtual Address" 
+          << " | " << std::setw(18) << "Physical Frame" 
+          << " | " << std::setw(8) << "In RAM" << " |\n";
+    debug << "| " << std::string(12, '-') << " | " << std::string(12, '-') 
+          << " | " << std::string(18, '-') << " | " << std::string(18, '-') 
+          << " | " << std::string(8, '-') << " |\n";
     for (const auto& p : processes) {
         if (p.is_process_stop) continue;
         auto it = page_tables.find(p.id);
         if (it != page_tables.end()) {
             json pt_json = it->second.second.export_json();
-            debug << "Process ID=" << p.id << ", Name=" << p.name << ", Levels=" 
-                  << it->second.second.get_levels() << ":\n";
-            // Table header
-            debug << "| " << std::left << std::setw(12) << "Virtual Page" 
-                  << " | " << std::setw(14) << "Physical Frame" 
-                  << " | " << std::setw(8) << "In RAM" << " |\n";
-            debug << "| " << std::string(12, '-') << " | " << std::string(14, '-') 
-                  << " | " << std::string(8, '-') << " |\n";
-            // Table rows
             for (const auto& entry : pt_json) {
-                debug << "| " << std::right << std::setw(12) << entry["virtual_page"].get<uint64_t>()
-                      << " | " << std::left << std::setw(14) << entry["physical_frame"].get<std::string>()
+                debug << "| " << std::left << std::setw(12) << entry["process_id"].get<std::string>()
+                      << " | " << std::right << std::setw(12) << entry["page_number"].get<uint64_t>()
+                      << " | " << std::left << std::setw(18) << entry["virtual_address"].get<std::string>()
+                      << " | " << std::setw(18) << entry["physical_frame"].get<std::string>()
                       << " | " << std::setw(8) << (entry["in_ram"].get<bool>() ? "1" : "0") << " |\n";
             }
         } else {
@@ -434,7 +425,6 @@ void VirtualMemorySimulator::simulate() {
         }
     }
 
-    // Simulate memory access
     TLB tlb(tlb_size);
     int simulation_duration = 100;
     std::uniform_int_distribution<> access_dist(0, 1);

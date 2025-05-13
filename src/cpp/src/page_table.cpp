@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <iomanip>
 
-uint64_t PageTable::last_used_frame_ = 0; // Static member to track last used frame
+uint64_t PageTable::last_used_frame_ = 0;
 
 uint64_t PageTable::get_last_used_frame() {
     return last_used_frame_;
@@ -13,10 +13,11 @@ uint64_t PageTable::get_last_used_frame() {
 
 PageTable::PageTable(uint64_t num_pages, uint64_t page_size_bytes, int entry_size, const std::string& allocation_type,
                      uint64_t ram_frames, uint64_t total_frames, uint64_t ram_size_bytes, double frame_percent,
-                     const std::string& process_id)
+                     const std::string& process_id, const std::string& virtual_address_size)
     : num_pages_(num_pages), page_size_bytes_(page_size_bytes), entry_size_(entry_size),
       allocation_type_(allocation_type), ram_frames_(ram_frames), total_frames_(total_frames),
-      ram_size_bytes_(ram_size_bytes), process_id_(process_id) {
+      ram_size_bytes_(ram_size_bytes), process_id_(process_id), virtual_address_size_(virtual_address_size),
+      top_level_frame_(0) { // Initialize top_level_frame_
     max_frames_ = static_cast<uint64_t>(ram_frames * frame_percent / 100.0);
     pages_per_frame_ = page_size_bytes / entry_size;
     entries_per_table_ = page_size_bytes / entry_size;
@@ -102,18 +103,18 @@ bool PageTable::allocate(uint64_t block_size_bytes, std::vector<uint64_t>& avail
     debug << "Process " << process_id_ << ": Allocating " << num_pages_ << " pages\n";
 
     // Allocate top-level table frame (within 1% of total frames)
-    uint64_t top_level_frame = get_unique_frame(available_table_frames, gen);
-    if (top_level_frame == UINT64_MAX) {
+    top_level_frame_ = get_unique_frame(available_table_frames, gen);
+    if (top_level_frame_ == UINT64_MAX) {
         debug << "Process " << process_id_ << ": Failed to allocate top-level table frame\n";
         debug.close();
         return false;
     }
-    ram_[top_level_frame] = "top_level_table_" + process_id_;
+    ram_[top_level_frame_] = "top_level_table_" + process_id_;
     if (levels_ > 1) {
-        top_level_table_[0] = {top_level_frame, true};
+        top_level_table_[0] = {top_level_frame_, true};
     }
     debug << "Process " << process_id_ << ": Allocated top-level table in frame 0x" 
-          << std::hex << top_level_frame << std::dec << "\n";
+          << std::hex << top_level_frame_ << std::dec << "\n";
 
     std::vector<uint64_t> pages_per_table(levels_ + 1, 1);
     for (int i = 1; i <= levels_; ++i) {
@@ -134,12 +135,11 @@ bool PageTable::allocate(uint64_t block_size_bytes, std::vector<uint64_t>& avail
         uint64_t table_frame_limit = static_cast<uint64_t>(ceil(total_frames_ * 0.01));
         start_frame = (last_used_frame_ == 0) ? table_frame_limit : last_used_frame_ + 1;
         if (start_frame < table_frame_limit) {
-            start_frame = table_frame_limit; // Ensure data frames start after table frames
+            start_frame = table_frame_limit;
         }
         uint64_t ram_pages = num_pages_;
         bool can_allocate = true;
 
-        // Check if RAM frames are sufficient
         if (num_pages_ > available_frames.size()) {
             ram_pages = available_frames.size();
             pages_in_swap = num_pages_ - ram_pages;
@@ -151,7 +151,6 @@ bool PageTable::allocate(uint64_t block_size_bytes, std::vector<uint64_t>& avail
             }
         }
 
-        // Verify RAM frames are contiguous
         for (uint64_t i = 0; i < ram_pages; ++i) {
             if (std::find(available_frames.begin(), available_frames.end(), start_frame + i) == available_frames.end()) {
                 debug << "Process " << process_id_ << ": Contiguous RAM block from 0x" << std::hex << start_frame 
@@ -161,7 +160,6 @@ bool PageTable::allocate(uint64_t block_size_bytes, std::vector<uint64_t>& avail
             }
         }
 
-        // Verify swap frames are contiguous (if needed)
         uint64_t swap_start_frame = 0;
         for (uint64_t i = 0; i < pages_in_swap; ++i) {
             if (std::find(available_swap_frames.begin(), available_swap_frames.end(), swap_start_frame + i) == available_swap_frames.end()) {
@@ -172,7 +170,6 @@ bool PageTable::allocate(uint64_t block_size_bytes, std::vector<uint64_t>& avail
             }
         }
 
-        // Allocate RAM frames
         for (uint64_t page = 1; page <= ram_pages; ++page) {
             uint64_t frame = start_frame + (page - 1);
             auto it = std::find(available_frames.begin(), available_frames.end(), frame);
@@ -182,7 +179,6 @@ bool PageTable::allocate(uint64_t block_size_bytes, std::vector<uint64_t>& avail
             set_page_entry(page, frame, true);
         }
 
-        // Allocate swap frames
         for (uint64_t page = ram_pages + 1; page <= num_pages_; ++page) {
             uint64_t frame = swap_start_frame + (page - ram_pages - 1);
             auto it = std::find(available_swap_frames.begin(), available_swap_frames.end(), frame);
@@ -200,7 +196,6 @@ bool PageTable::allocate(uint64_t block_size_bytes, std::vector<uint64_t>& avail
             last_used_frame_ = std::max(last_used_frame_, swap_start_frame + pages_in_swap - 1);
         }
     } else {
-        // Non-contiguous allocation
         for (uint64_t page = 1; page <= num_pages_; ++page) {
             uint64_t frame = 0;
             bool in_ram = true;
@@ -248,7 +243,6 @@ bool PageTable::allocate(uint64_t block_size_bytes, std::vector<uint64_t>& avail
         }
     }
 
-    // Multi-level page table allocation
     if (levels_ > 1) {
         for (uint64_t page = 1; page <= num_pages_; ++page) {
             if (pages_in_current_table == 0) {
@@ -347,14 +341,14 @@ void PageTable::log_swap_map() const {
 }
 
 bool PageTable::access(uint64_t virtual_address) {
-    uint64_t page_number = virtual_address / page_size_bytes_ + 1; // 1-based
+    uint64_t page_number = virtual_address / page_size_bytes_ + 1;
     if (page_number < 1 || page_number > num_pages_) {
         return false;
     }
 
     if (levels_ == 1) {
         auto& entry = single_level_table_[page_number - 1];
-        return !entry.second; // Return false if in swap
+        return !entry.second;
     } else if (levels_ == 2) {
         uint64_t level1_idx = ((page_number - 1) >> bits_per_level_) & (entries_per_table_ - 1);
         uint64_t level2_idx = (page_number - 1) & (entries_per_table_ - 1);
@@ -390,6 +384,8 @@ bool PageTable::access(uint64_t virtual_address) {
 
 json PageTable::export_json() const {
     json pt;
+    // Calculate hex digits for physical frame based on RAM size
+    int hex_digits = static_cast<int>(ceil(log2(ram_size_bytes_) / 4.0));
     for (uint64_t i = 1; i <= num_pages_; ++i) {
         uint64_t frame_number = 0;
         bool in_ram = false;
@@ -427,11 +423,27 @@ json PageTable::export_json() const {
         }
         std::stringstream ss;
         if (in_ram) {
-            ss << "0x" << std::hex << frame_number;
+            ss << "0x" << std::hex << std::setfill('0') << std::setw(hex_digits) << frame_number;
         } else {
-            ss << "1x" << std::hex << frame_number;
+            ss << "1x" << std::hex << std::setfill('0') << std::setw(hex_digits) << frame_number;
         }
-        pt.push_back({{"virtual_page", i}, {"physical_frame", ss.str()}, {"in_ram", in_ram}});
+        // Use page number as virtual address
+        std::stringstream va_ss;
+        uint64_t virtual_address = i - 1; // Page number starts at 1, so subtract 1
+        if (virtual_address_size_ == "16-bit") {
+            va_ss << "0x" << std::hex << std::setfill('0') << std::setw(4) << virtual_address;
+        } else if (virtual_address_size_ == "32-bit") {
+            va_ss << "0x" << std::hex << std::setfill('0') << std::setw(8) << virtual_address;
+        } else {
+            va_ss << "0x" << std::hex << std::setfill('0') << std::setw(16) << virtual_address;
+        }
+        pt.push_back({
+            {"process_id", process_id_},
+            {"page_number", i},
+            {"virtual_address", va_ss.str()},
+            {"physical_frame", ss.str()},
+            {"in_ram", in_ram}
+        });
     }
     return pt;
 }
@@ -578,4 +590,8 @@ int PageTable::get_levels() const {
 
 const std::string& PageTable::get_process_id() const {
     return process_id_;
+}
+
+uint64_t PageTable::get_top_level_frame() const {
+    return top_level_frame_;
 }
