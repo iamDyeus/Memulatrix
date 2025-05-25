@@ -9,27 +9,30 @@
 
 using json = nlohmann::json;
 
-class PageTable {
+class PageTable
+{
 public:
-    PageTable(uint64_t num_pages, uint64_t page_size_bytes, int entry_size, const std::string& allocation_type,
+    PageTable(uint64_t num_pages, uint64_t page_size_bytes, int entry_size, const std::string &allocation_type,
               uint64_t ram_frames, uint64_t total_frames, uint64_t ram_size_bytes, double frame_percent,
-              const std::string& process_id, const std::string& virtual_address_size);
+              const std::string &process_id, const std::string &virtual_address_size);
     ~PageTable();
 
-    bool allocate(uint64_t block_size_bytes, std::vector<uint64_t>& available_frames,
-                 std::vector<uint64_t>& available_table_frames, std::mt19937& gen,
-                 std::vector<uint64_t>& available_swap_frames);
+    bool allocate(uint64_t block_size_bytes, std::vector<uint64_t> &available_frames,
+                  std::vector<uint64_t> &available_table_frames, std::mt19937 &gen,
+                  std::vector<uint64_t> &available_swap_frames);
     bool access(uint64_t virtual_address);
     json export_json() const;
     uint64_t size_bytes() const;
     uint64_t lookup(uint64_t page_number) const;
     int get_levels() const;
-    const std::string& get_process_id() const;
+    const std::string &get_process_id() const;
     static uint64_t get_last_used_frame();
     uint64_t get_top_level_frame() const;
-    void free_frames(std::vector<uint64_t>& available_frames, std::vector<uint64_t>& available_table_frames);
+    void free_frames(std::vector<uint64_t> &available_frames, std::vector<uint64_t> &available_table_frames);
     void set_frame_availability(bool available);
-    void free_swap_frames(std::vector<uint64_t>& available_swap_frames);
+    void free_swap_frames(std::vector<uint64_t> &available_swap_frames);
+    bool allocate_frame(uint64_t page_number, std::vector<uint64_t> &available_frames,
+                        std::vector<uint64_t> &available_swap_frames);
 
 private:
     uint64_t num_pages_;
@@ -50,19 +53,21 @@ private:
     uint64_t top_level_frame_;
     std::vector<std::pair<uint64_t, bool>> single_level_table_;
     std::vector<std::pair<uint64_t, bool>> top_level_table_;
-    std::vector<std::vector<std::pair<uint64_t, bool>>*> second_level_tables_;
-    std::vector<std::vector<std::pair<uint64_t, bool>>*> third_level_tables_;
-    std::vector<std::vector<std::pair<uint64_t, bool>>*> fourth_level_tables_;
+    std::vector<std::vector<std::pair<uint64_t, bool>> *> second_level_tables_;
+    std::vector<std::vector<std::pair<uint64_t, bool>> *> third_level_tables_;
+    std::vector<std::vector<std::pair<uint64_t, bool>> *> fourth_level_tables_;
     std::unordered_map<uint64_t, std::pair<std::string, bool>> ram_; // {content, available}
     std::unordered_map<std::string, std::string> swap_map_;
     std::unordered_map<uint64_t, uint64_t> entries_;
 
     int calculate_levels();
     void initialize_page_tables();
-    uint64_t get_unique_frame(std::vector<uint64_t>& available_frames, std::mt19937& gen);
-    uint64_t get_unique_swap_frame(std::vector<uint64_t>& available_swap_frames, std::mt19937& gen);
+    uint64_t get_unique_frame(std::vector<uint64_t> &available_frames, std::mt19937 &gen);
+    uint64_t get_unique_swap_frame(std::vector<uint64_t> &available_swap_frames, std::mt19937 &gen);
     void set_page_entry(uint64_t page_number, uint64_t frame_number, bool in_ram);
     void log_page_table_creation();
     void log_swap_map() const;
+    bool handle_page_fault(uint64_t page_number, std::vector<uint64_t> &available_frames,
+                           std::vector<uint64_t> &available_swap_frames);
 };
 #endif

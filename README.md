@@ -1,16 +1,17 @@
 # Memulatrix
+
 Virtual Memory Simulator for educational purposes, built with C++ and Python.
 
 ![image](https://github.com/user-attachments/assets/7fbccc8c-8262-4e11-be8e-b35b4d3bf632)
 ![image](https://github.com/user-attachments/assets/a04b9f59-9654-4394-9fde-f0ac333c812b)
 
-
-
 > [!IMPORTANT]  
-We are currently working on the project. Please check back later for updates and better documentation.
+> We are currently working on the project. Please check back later for updates and better documentation.
 
 ## Proposed Project Structure
+
 The project is organized into the following directories:
+
 ```
 Memulatrix/
 │── docs/                      # Documentation (README, architecture diagrams, API docs)
@@ -34,8 +35,11 @@ Memulatrix/
 │── .gitignore                 # Ignore compiled files, logs, etc.
 │── README.md                  # Project overview
 ```
+
 ## Installation
+
 ### Prerequisites
+
 - C++ compiler (g++) - version 14
 - Python 3.8 or higher
 
@@ -52,11 +56,11 @@ Memulatrix/
    ```
    you'll be in something like `Memulatrix/src/cpp`
 3. Run the build command:
-    ```bash
-    g++ -std=c++14 -Iinclude -DCPPHTTPLIB_NO_UNIX_SOCKETS src/virtual_memory_simulator.cpp src/page_table.cpp src/socket_handler.cpp -o D:\projects\Memulatrix\bin\virtual_memory_simulator.exe -lWs2_32
-    ```
-    Manually verify that the `virtual_memory_simulator.exe` file is created in the `bin` directory.
-4. Run the Python UI from the root directory:
+   ```bash
+   g++ -std=c++14 -Iinclude -DCPPHTTPLIB_NO_UNIX_SOCKETS src/virtual_memory_simulator.cpp src/page_table.cpp  -o D:\projects\Memulatrix\bin\virtual_memory_simulator.exe -lWs2_32
+   ```
+   Manually verify that the `virtual_memory_simulator.exe` file is created in the `bin` directory.
+4. Run the Python UI from the root directory: (make sure you've the virtual environment activated and the dependencies installed) 
    ```bash
    python src/python/main.py
    ```

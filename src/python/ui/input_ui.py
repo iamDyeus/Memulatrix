@@ -45,6 +45,8 @@ class VirtualMemoryUI:
 
         # RAM Frame contents
         ctk.CTkLabel(self.ram_frame, text="RAM & ROM Settings", font=("Arial", 16)).pack(pady=5)
+        
+        ctk.CTkLabel(self.ram_frame, text="RAM Size (GB):", font=("Arial", 12)).pack(anchor="w", padx=10, pady=2)
         self.ram_size_var = ctk.StringVar(value="1")
         ram_sizes = ["1", "2"] + [str(i) for i in range(4, 65, 4)]
         self.ram_dropdown = ctk.CTkOptionMenu(self.ram_frame, values=ram_sizes, variable=self.ram_size_var, command=self.logic_handler.update_options)
@@ -127,10 +129,6 @@ class VirtualMemoryUI:
         self.system_process_menu = ctk.CTkOptionMenu(self.system_process_frame, values=system_processes, variable=self.system_process_var)
         self.system_process_menu.pack(pady=5)
 
-        self.set_priority_var = ctk.BooleanVar()
-        self.priority_checkbutton = ctk.CTkCheckBox(self.process_frame, text="Set Priority?", variable=self.set_priority_var)
-        self.priority_checkbutton.pack(pady=5)
-
         # Button Frame for Add Process and Confirm Processes
         self.button_frame = ctk.CTkFrame(self.process_frame, fg_color="transparent")
         self.button_frame.pack(pady=5)
@@ -177,17 +175,6 @@ class VirtualMemoryUI:
         else:
             ctk.set_appearance_mode("light")
 
-    def disable_process_add_section(self):
-        self.process_name_entry.configure(state="disabled")
-        self.process_size_entry.configure(state="disabled")
-        self.process_type_var.set("User")
-        self.process_type_menu.configure(state="disabled")
-        self.system_process_menu.configure(state="disabled")
-        self.set_priority_var.set(False)
-        self.priority_checkbutton.configure(state="disabled")
-        self.add_process_button.configure(state="disabled")
-        self.confirm_process_button.configure(state="disabled")
-
     def enable_process_add_section(self):
         self.process_name_entry.configure(state="normal")
         self.process_size_entry.configure(state="normal")
@@ -196,10 +183,18 @@ class VirtualMemoryUI:
             self.system_process_menu.configure(state="normal")
         else:
             self.system_process_menu.configure(state="disabled")
-        self.priority_checkbutton.configure(state="normal")
         self.add_process_button.configure(state="normal")
         if self.process_list:
             self.confirm_process_button.configure(state="normal")
+
+    def disable_process_add_section(self):
+        self.process_name_entry.configure(state="disabled")
+        self.process_size_entry.configure(state="disabled")
+        self.process_type_var.set("User")
+        self.process_type_menu.configure(state="disabled")
+        self.system_process_menu.configure(state="disabled")
+        self.add_process_button.configure(state="disabled")
+        self.confirm_process_button.configure(state="disabled")
 
     def toggle_system_dropdown(self, value):
         if self.process_type_var.get() == "System":
