@@ -55,10 +55,9 @@ bool VirtualMemorySimulator::load_settings()
         rom_size = env_settings["rom_size"].get<std::string>();
         swap_percent = static_cast<int>(env_settings["swap_percent"].get<double>());
         allocation_type = env_settings["allocation_type"].get<std::string>();
-
         int entry_size = (virtual_address_size == "16-bit") ? 2 : (virtual_address_size == "32-bit") ? 4
                                                                                                      : 8;
-        tlb_capacity = (tlb_size * 1024) / entry_size;
+        tlb_capacity = std::max(1, (tlb_size * 1024) / entry_size); // Ensure minimum capacity of 1
 
         // Load process settings
         processes.clear();
@@ -186,9 +185,7 @@ void VirtualMemorySimulator::simulate()
                << "VASize=" << virtual_address_size << ", "
                << "ROM=" << rom_size << ", "
                << "Swap=" << swap_percent << "%, "
-               << "Allocation=" << allocation_type << "\n\n";
-
-    // Print process information
+               << "Allocation=" << allocation_type << "\n\n"; // Print process information
     debug_file << "Active Processes:\n";
     for (const auto &p : processes)
     {
@@ -288,19 +285,41 @@ void VirtualMemorySimulator::simulate()
         debug_file << "  Number of pages: " << num_pages << "\n";
         debug_file << "  Top level frame: 0x" << std::hex << pt.get_top_level_frame() << std::dec << "\n";
 
-        page_tables.emplace(p.id, PageTableEntry(pt.get_top_level_frame(), std::move(pt), 1, -1));
-        tlb_hits.push_back({std::stoi(p.id), 0});
-        tlb_misses.push_back({std::stoi(p.id), 0});
-        tlb_hit_rate.push_back({std::stoi(p.id), 0.0});
-        page_faults.push_back({std::stoi(p.id), 0});
-    }
+        page_tables.emplace(p.id, PageTableEntry(pt.get_top_level_frame(), std::move(pt), 1, -1)); // Initialize statistics for each active process
+        for (const auto &p : processes)
+        {
+            if (p.is_process_stop)
+                continue;
 
+            tlb_hits.push_back({std::stoi(p.id), 0});
+            tlb_misses.push_back({std::stoi(p.id), 0});
+            tlb_hit_rate.push_back({std::stoi(p.id), 0.0});
+            page_faults.push_back({std::stoi(p.id), 0});
+        }
+    }
     debug_file << "\nStarting simulation loop...\n";
+
+    // Print the initial page tables
+    print_page_tables(debug_file);
+
     debug_file.flush();
     std::cout << "Starting simulation loop...\n";
-
     std::uniform_int_distribution<> access_dist(0, 1);
-    std::uniform_int_distribution<uint64_t> va_dist(0, UINT64_MAX);
+
+    // Create realistic page distributions for each process
+    std::vector<std::uniform_int_distribution<uint64_t>> page_distributions;
+    for (const auto &p : processes)
+    {
+        if (p.is_process_stop)
+        {
+            page_distributions.emplace_back(0, 0); // Dummy distribution for stopped processes
+            continue;
+        }
+
+        uint64_t process_size_bytes = static_cast<uint64_t>(p.size_gb) * 1024ULL * 1024 * 1024;
+        uint64_t max_page = (process_size_bytes + page_size_bytes - 1) / page_size_bytes - 1;
+        page_distributions.emplace_back(0, max_page);
+    }
 
     int simulation_duration = 100;
     for (int t = 0; t < simulation_duration; ++t)
@@ -310,24 +329,27 @@ void VirtualMemorySimulator::simulate()
             std::cout << "Simulation progress: " << (t * 100 / simulation_duration) << "%\n";
             debug_file << "\n=== Time step " << t << " ===\n";
             debug_file.flush();
-        }
-
-        // Iterate through active processes
+        } // Iterate through active processes
+        int process_index = 0;
         for (const auto &p : processes)
         {
             if (p.is_process_stop)
+            {
+                process_index++;
                 continue;
+            }
 
             auto it = page_tables.find(p.id);
             if (it == page_tables.end() || it->second.flag != 1)
             {
                 debug_file << "Process " << p.id << ": Page table not found or invalid\n";
+                process_index++;
                 continue;
             }
 
-            // Generate memory access
-            uint64_t va = va_dist(gen);
-            uint64_t page_number = va / page_size_bytes;
+            // Generate realistic memory access within process bounds
+            uint64_t page_number = page_distributions[process_index](gen);
+            uint64_t va = page_number * page_size_bytes;
             bool is_write = access_dist(gen) == 1;
 
             debug_file << "\nProcess " << p.id << ": Accessing VA=0x" << std::hex << va
@@ -446,9 +468,10 @@ void VirtualMemorySimulator::simulate()
                     rate_it->second = total > 0 ? (double)hits_it->second / total : 0.0;
                 }
             }
-
             debug_file << "Memory access completed successfully\n";
             debug_file.flush();
+
+            process_index++;
         }
 
         // Print periodic statistics
@@ -506,8 +529,12 @@ void VirtualMemorySimulator::simulate()
             debug_file.flush();
         }
     }
-
     debug_file << "\n=== Simulation Complete ===\n";
+
+    // Print final page tables before closing
+    debug_file << "\nFinal page tables state:\n";
+    print_page_tables(debug_file);
+
     debug_file.close();
 }
 
@@ -615,8 +642,11 @@ void VirtualMemorySimulator::tlb_remove_process(const std::string &pid)
 
 void VirtualMemorySimulator::tlb_insert(const std::string &pid, uint64_t page_no, uint64_t virtual_address, uint64_t frame_no, int process_status)
 {
+    if (tlb_capacity <= 0)
+        return; // Don't insert if TLB is disabled or has no capacity
+
     std::string key = pid + "_" + std::to_string(page_no);
-    if (tlb.size() >= tlb_capacity)
+    if (tlb.size() >= static_cast<size_t>(tlb_capacity))
     {
         std::string old_key = tlb_fifo.front();
         tlb_fifo.pop();
@@ -648,6 +678,60 @@ uint64_t VirtualMemorySimulator::tlb_get_frame(const std::string &pid, uint64_t 
     debug << "TLB: Miss for " << key << "\n";
     debug.close();
     return UINT64_MAX;
+}
+
+void VirtualMemorySimulator::print_page_tables(std::ofstream &debug_file)
+{
+    debug_file << "Page tables for all active processes:\n";
+    debug_file << "| Process ID   | Page Number  | Virtual Address    | Physical Frame     | In RAM   |\n";
+    debug_file << "| ------------ | ------------ | ------------------ | ------------------ | -------- |\n";
+
+    for (const auto &page_table_entry : page_tables)
+    {
+        const std::string &process_id = page_table_entry.first;
+        const PageTableEntry &pt_entry = page_table_entry.second;
+
+        if (pt_entry.flag != 1)
+        {
+            // Skip inactive processes
+            continue;
+        }
+
+        json pt_json = pt_entry.page_table.export_json();
+        if (pt_json.find("pages") != pt_json.end() && pt_json["pages"].is_array())
+        {
+            for (const auto &page_entry : pt_json["pages"])
+            {
+                if (page_entry.find("page_number") == page_entry.end() ||
+                    page_entry.find("frame") == page_entry.end())
+                {
+                    continue;
+                }
+
+                uint64_t page_number = page_entry["page_number"].get<uint64_t>();
+                uint64_t frame = page_entry["frame"].get<uint64_t>();
+                bool in_ram = true; // Assume all entries are in RAM unless otherwise specified
+                if (page_entry.find("in_ram") != page_entry.end())
+                {
+                    in_ram = page_entry["in_ram"].get<bool>();
+                }
+
+                // Calculate virtual address for the page
+                uint64_t virtual_address = page_number * page_size_bytes;
+
+                // Format the output to match the desired format exactly
+                std::stringstream va_stream, frame_stream;
+                va_stream << std::hex << std::setfill('0') << std::setw(8) << virtual_address;
+                frame_stream << std::hex << std::setfill('0') << std::setw(9) << frame;
+
+                debug_file << "| " << std::left << std::setw(12) << process_id << " | "
+                           << std::right << std::setw(12) << page_number << " | "
+                           << "0x" << va_stream.str() << " | "
+                           << "0x" << frame_stream.str() << " | "
+                           << std::setfill(' ') << std::dec << std::setw(8) << (in_ram ? "1" : "0") << " |\n";
+            }
+        }
+    }
 }
 
 int main()

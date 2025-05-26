@@ -88,6 +88,7 @@ private:
     void cleanup_process(const std::string &pid);
     bool should_abort_simulation(const std::chrono::steady_clock::time_point &start_time,
                                  int inactive_cycles);
+    void print_page_tables(std::ofstream &debug_file);
 };
 
 #endif
