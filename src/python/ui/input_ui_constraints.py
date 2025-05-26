@@ -179,7 +179,6 @@ class LogicHandler:
             results_path = os.path.join("bin", "simulation_results.json")
             attempt = 0
             max_attempts = 5
-            
             while attempt < max_attempts:
                 if os.path.exists(results_path):
                     try:
@@ -187,6 +186,8 @@ class LogicHandler:
                             results = json.load(f)
                             dialog = CustomMessageBox(self.ui.app, "Success", "Simulation completed successfully.", ["OK"])
                             dialog.get()
+                            # Display the results in the UI
+                            self.display_results(results_path)
                             return True
                     except json.JSONDecodeError:
                         print(f"Invalid JSON in results file (attempt {attempt + 1})")
@@ -285,7 +286,7 @@ class LogicHandler:
             max_attempts = 5
             
             while attempt < max_attempts:
-                attempt += 1
+                attempt += 1                
                 if os.path.exists(results_path):
                     try:
                         with open(results_path, 'r') as f:
@@ -293,6 +294,8 @@ class LogicHandler:
                             dialog = CustomMessageBox(self.ui.app, "Success", 
                                                     "Simulation completed successfully.", ["OK"])
                             dialog.get()
+                            # Display the results in the UI
+                            self.display_results(results_path)
                             return
                     except json.JSONDecodeError:
                         print(f"Invalid JSON in results file (attempt {attempt})")
@@ -494,3 +497,15 @@ class LogicHandler:
         self.ui.process_size_entry.configure(state="disabled")
         self.ui.process_type_menu.configure(state="disabled")
         self.ui.add_process_button.configure(state="disabled")
+        
+    def display_results(self, results_path):
+        """Display simulation results in charts"""
+        # Switch to the Results tab
+        self.ui.main_tabview.set("Results")
+        
+        # Create the charts using the ChartViewer
+        if self.ui.chart_viewer.create_charts(results_path):
+            print("Charts created successfully")
+        else:
+            print("Failed to create charts")
+            messagebox.showerror("Error", "Failed to display simulation results charts")
