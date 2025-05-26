@@ -2,10 +2,9 @@
 #define PROCESS_H
 
 #include <string>
-#include <cstdint>
+#include <cstdint> // Added to define uint64_t
 
-struct Process
-{
+struct Process {
     std::string id;
     std::string name;
     uint64_t size_bytes;

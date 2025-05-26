@@ -20,6 +20,7 @@ public:
                  std::vector<uint64_t>& available_table_frames, std::mt19937& gen,
                  std::vector<uint64_t>& available_swap_frames);
     bool access(uint64_t virtual_address);
+    bool get_in_ram_status(uint64_t page_number) const; // New method to get in_ram status
     json export_json() const;
     uint64_t size_bytes() const;
     uint64_t lookup(uint64_t page_number) const;
