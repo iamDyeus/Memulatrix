@@ -19,11 +19,8 @@ class ChartViewer:
             with open(results_path, 'r') as f:
                 results = json.load(f)
             
-            # Clear any existing charts
-            for widget in self.charts.values():
-                if widget:
-                    widget.destroy()
-            self.charts = {}
+            # First destroy any existing charts properly
+            self.destroy_charts()
             
             # Create a tab view for the charts
             self.tab_view = ctk.CTkTabview(self.parent)
@@ -205,12 +202,19 @@ class ChartViewer:
     def destroy_charts(self):
         """Destroy all charts to clean up memory"""
         try:
-            if hasattr(self, 'tab_view'):
-                self.tab_view.destroy()
+            # Close all matplotlib figures to prevent memory leaks
+            plt.close('all')
             
+            # Destroy all chart widgets
             for widget in self.charts.values():
                 if widget:
                     widget.destroy()
             self.charts = {}
+            
+            # Destroy tab view if it exists
+            if hasattr(self, 'tab_view'):
+                self.tab_view.destroy()
+                delattr(self, 'tab_view')
+                
         except Exception as e:
             print(f"Error destroying charts: {e}")
