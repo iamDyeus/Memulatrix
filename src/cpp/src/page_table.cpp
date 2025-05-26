@@ -416,6 +416,45 @@ bool PageTable::access(uint64_t virtual_address) {
     }
 }
 
+bool PageTable::get_in_ram_status(uint64_t page_number) const {
+    if (page_number < 1 || page_number > num_pages_) {
+        std::ofstream debug("debug.txt", std::ios::app);
+        debug << "Process " << process_id_ << ": Invalid page number " << page_number << " for in_ram status\n";
+        debug.close();
+        return false;
+    }
+    if (levels_ == 1) {
+        return single_level_table_[page_number - 1].second;
+    } else if (levels_ == 2) {
+        uint64_t level1_idx = ((page_number - 1) >> bits_per_level_) & (entries_per_table_ - 1);
+        uint64_t level2_idx = (page_number - 1) & (entries_per_table_ - 1);
+        if (!top_level_table_[level1_idx].second) {
+            return false;
+        }
+        return second_level_tables_[level1_idx]->at(level2_idx).second;
+    } else if (levels_ == 3) {
+        uint64_t level1_idx = ((page_number - 1) >> (2 * bits_per_level_)) & (entries_per_table_ - 1);
+        uint64_t level2_idx = ((page_number - 1) >> bits_per_level_) & (entries_per_table_ - 1);
+        uint64_t level3_idx = (page_number - 1) & (entries_per_table_ - 1);
+        if (!top_level_table_[level1_idx].second || !second_level_tables_[level1_idx]->at(level2_idx).second) {
+            return false;
+        }
+        return third_level_tables_[level1_idx * entries_per_table_ + level2_idx]->at(level3_idx).second;
+    } else {
+        uint64_t level1_idx = ((page_number - 1) >> (3 * bits_per_level_)) & (entries_per_table_ - 1);
+        uint64_t level2_idx = ((page_number - 1) >> (2 * bits_per_level_)) & (entries_per_table_ - 1);
+        uint64_t level3_idx = ((page_number - 1) >> bits_per_level_) & (entries_per_table_ - 1);
+        uint64_t level4_idx = (page_number - 1) & (entries_per_table_ - 1);
+        if (!top_level_table_[level1_idx].second ||
+            !second_level_tables_[level1_idx]->at(level2_idx).second ||
+            !third_level_tables_[level1_idx * entries_per_table_ + level2_idx]->at(level3_idx).second) {
+            return false;
+        }
+        return fourth_level_tables_[(level1_idx * entries_per_table_ * entries_per_table_ +
+                                    level2_idx * entries_per_table_ + level3_idx)]->at(level4_idx).second;
+    }
+}
+
 json PageTable::export_json() const {
     json pt;
     int hex_digits = static_cast<int>(ceil(log2(ram_size_bytes_) / 4.0));

@@ -356,14 +356,14 @@ void VirtualMemorySimulator::simulate() {
         }
     }
 
-    int simulation_duration = 100;
+    int simulation_duration = 10000;
     std::uniform_int_distribution<> access_dist(0, 1);
     std::uniform_int_distribution<uint64_t> va_dist(0, va_max);
 
     for (int t = 0; t < simulation_duration; t++) {
         for (const auto& p : processes) {
             if (p.is_process_stop) continue;
-            if (access_dist(gen) == 0) continue;
+           // if (access_dist(gen) == 0) continue;
 
             uint64_t virtual_address = va_dist(gen) % p.size_bytes;
             uint64_t page_no = virtual_address / page_size_bytes + 1;
@@ -380,15 +380,21 @@ void VirtualMemorySimulator::simulate() {
                 } else {
                     total_misses++;
                     frame = it->second.page_table.lookup(page_no);
-                    bool in_ram = it->second.page_table.access(virtual_address);
-                    if (in_ram) {
-                        tlb_insert(p.id, page_no, virtual_address, frame, it->second.flag);
-                    }
+                    if (frame != UINT64_MAX) {
+                        bool in_ram = it->second.page_table.get_in_ram_status(page_no);
+                        if (in_ram) {
+                            tlb_insert(p.id, page_no, virtual_address, frame, it->second.flag);
+                        } else {
+                            total_faults++;
+                        }
+                    } 
+                }
+            } else {
+                bool in_ram = it->second.page_table.get_in_ram_status(page_no);
+                if (!in_ram) {
+                    total_faults++;
                 }
             }
-
-            bool fault = it->second.page_table.access(virtual_address);
-            if (fault) total_faults++;
 
             tlb_hits.push_back({t, total_hits});
             tlb_misses.push_back({t, total_misses});
