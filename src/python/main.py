@@ -9,7 +9,7 @@ class AppManager:
         self.root = ctk.CTk()
         self.simulator_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "bin", "virtual_memory_simulator.exe"))
         self.simulator_process = None
-        self.start_simulator()
+        # Don't start the simulator automatically - wait for user to click "Confirm Processes"
         self.ui = VirtualMemoryUI(
             self.root,
             env_file_path=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "bin", "environment.json")),

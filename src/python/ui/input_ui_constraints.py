@@ -137,8 +137,8 @@ class LogicHandler:
             return True
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
-            return False
-
+            return False    
+        
     def load_processes_from_json(self):
         if self.proc_file_path and os.path.exists(self.proc_file_path):
             try:
@@ -151,12 +151,14 @@ class LogicHandler:
                             self.ui.add_process_to_list(process_info, process['id'], process['is_process_stop'])
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to load process data: {str(e)}")
-
+                
     def send_to_cpp(self, force_new=False):
-        if not self.start_simulator(force_new):
-            return False
-
+        # Make sure to save settings first
         if not self.save_to_json():
+            return False
+        
+        # Start the simulator only after settings are confirmed
+        if not self.start_simulator(force_new):
             return False
 
         try:
@@ -239,7 +241,71 @@ class LogicHandler:
         if not self.process_data:
             messagebox.showerror("Error", "No processes added yet")
             return
-        self.send_to_cpp()
+        
+        # First, save the configuration
+        if not self.save_to_json():
+            messagebox.showerror("Error", "Failed to save configuration")
+            return
+        
+        # Create a ready flag file to tell the simulator to start
+        ready_flag_path = os.path.join("bin", "ready.flag")
+        try:
+            with open(ready_flag_path, 'w') as f:
+                f.write("ready")
+        except Exception as e:
+            print(f"Failed to create ready flag: {str(e)}")
+            
+        # Then start the simulator
+        if not self.start_simulator(force_new=True):
+            messagebox.showerror("Error", "Failed to start simulator")
+            return
+            
+        dialog = CustomMessageBox(self.ui.app, "Simulation Started", 
+                                "Simulation has been started. Please wait for results...", ["OK"])
+        dialog.get()
+        
+        # Wait for the simulator to generate results
+        try:
+            print("Starting simulation...")
+            
+            # Wait for simulator to complete with a timeout
+            if self.simulator_process:
+                max_wait = 80  # Maximum wait time in seconds
+                start_time = time.time()
+                while time.time() - start_time < max_wait:
+                    if self.simulator_process.poll() is not None:
+                        break
+                    time.sleep(0.5)
+                else:
+                    print("Simulator is taking too long, checking for results anyway")
+
+            # Check for results
+            results_path = os.path.join("bin", "simulation_results.json")
+            attempt = 0
+            max_attempts = 5
+            
+            while attempt < max_attempts:
+                attempt += 1
+                if os.path.exists(results_path):
+                    try:
+                        with open(results_path, 'r') as f:
+                            results = json.load(f)
+                            dialog = CustomMessageBox(self.ui.app, "Success", 
+                                                    "Simulation completed successfully.", ["OK"])
+                            dialog.get()
+                            return
+                    except json.JSONDecodeError:
+                        print(f"Invalid JSON in results file (attempt {attempt})")
+                        time.sleep(1)
+                else:
+                    print(f"Results file not found (attempt {attempt})")
+                    time.sleep(1)
+                    
+            messagebox.showerror("Error", "Simulator did not generate valid results after multiple attempts")
+            
+        except Exception as e:
+            print(f"Simulation error: {str(e)}")
+            messagebox.showerror("Error", f"Error during simulation: {str(e)}")
 
     def toggle_system_dropdown(self, value):
         self.ui.toggle_system_dropdown(value)

@@ -37,8 +37,34 @@ bool VirtualMemorySimulator::load_settings()
 
         if (!env_file.is_open() || !proc_file.is_open())
         {
-            std::cerr << "Failed to open JSON files in " << bin_directory << std::endl;
-            return false;
+            std::ofstream debug("debug.txt", std::ios::app);
+            debug << "Required configuration files not found. Waiting for UI to create them..." << std::endl;
+            debug.close();
+
+            // Create empty default config files
+            std::ofstream default_env(bin_directory + "/environment.json");
+            if (default_env.is_open())
+            {
+                default_env << "{\"ram_size_gb\": 1, \"page_size_kb\": 4, \"tlb_size\": 16, \"tlb_enabled\": false, \"virtual_address_size\": \"16-bit\", \"rom_size\": \"32 GB\", \"swap_percent\": 0, \"allocation_type\": \"Contiguous\"}" << std::endl;
+                default_env.close();
+            }
+
+            std::ofstream default_proc(bin_directory + "/processes.json");
+            if (default_proc.is_open())
+            {
+                default_proc << "[]" << std::endl;
+                default_proc.close();
+            }
+
+            // Re-open the files
+            env_file.open(bin_directory + "/environment.json");
+            proc_file.open(bin_directory + "/processes.json");
+
+            if (!env_file.is_open() || !proc_file.is_open())
+            {
+                std::cerr << "Failed to create or open config files in " << bin_directory << std::endl;
+                return false;
+            }
         }
 
         json env_settings;
@@ -140,21 +166,6 @@ json VirtualMemorySimulator::export_results()
     result["tlb_stats"]["total_misses"] = total_misses;
     result["page_faults"] = page_faults;
     result["total_faults"] = total_faults;
-
-    json pts;
-    for (const auto &pt : page_tables)
-    {
-        if (pt.second.flag == -1)
-            continue;
-        json pt_entry;
-        pt_entry["process_id"] = pt.first;
-        pt_entry["base_address"] = pt.second.top_level_frame;
-        pt_entry["table"] = pt.second.page_table.export_json();
-        pt_entry["flag"] = pt.second.flag;
-        pt_entry["last_executed_page"] = pt.second.last_executed_page;
-        pts.push_back(pt_entry);
-    }
-    result["page_tables"] = pts;
 
     return result;
 }
@@ -304,21 +315,27 @@ void VirtualMemorySimulator::simulate()
 
     debug_file.flush();
     std::cout << "Starting simulation loop...\n";
-    std::uniform_int_distribution<> access_dist(0, 1);
-
-    // Create realistic page distributions for each process
+    std::uniform_int_distribution<> access_dist(0, 1); // Create realistic page distributions for each process with locality
     std::vector<std::uniform_int_distribution<uint64_t>> page_distributions;
+    std::vector<uint64_t> last_accessed_pages;                // Track last accessed page for each process to simulate locality
+    std::vector<uint64_t> max_pages;                          // Store max page number for each process
+    std::uniform_real_distribution<> locality_dist(0.0, 1.0); // For deciding whether to use locality
+
     for (const auto &p : processes)
     {
         if (p.is_process_stop)
         {
             page_distributions.emplace_back(0, 0); // Dummy distribution for stopped processes
+            last_accessed_pages.push_back(0);
+            max_pages.push_back(0);
             continue;
         }
 
         uint64_t process_size_bytes = static_cast<uint64_t>(p.size_gb) * 1024ULL * 1024 * 1024;
         uint64_t max_page = (process_size_bytes + page_size_bytes - 1) / page_size_bytes - 1;
         page_distributions.emplace_back(0, max_page);
+        last_accessed_pages.push_back(0); // Initialize with first page
+        max_pages.push_back(max_page);
     }
 
     int simulation_duration = 100;
@@ -345,10 +362,28 @@ void VirtualMemorySimulator::simulate()
                 debug_file << "Process " << p.id << ": Page table not found or invalid\n";
                 process_index++;
                 continue;
+            } // Generate realistic memory access with temporal and spatial locality
+            uint64_t page_number;
+
+            // 70% chance to use temporal locality (same page or nearby)
+            if (locality_dist(gen) < 0.7)
+            {
+                // Either use the exact same page (temporal locality) or a nearby page (spatial locality)
+                int offset = std::uniform_int_distribution<>(-3, 3)(gen); // Small range for locality
+                page_number = static_cast<int64_t>(last_accessed_pages[process_index]) + offset;
+
+                // Ensure the page number is within valid range
+                page_number = std::max(uint64_t(0), std::min(page_number, max_pages[process_index]));
+            }
+            else
+            {
+                // 30% chance to access a completely random page
+                page_number = page_distributions[process_index](gen);
             }
 
-            // Generate realistic memory access within process bounds
-            uint64_t page_number = page_distributions[process_index](gen);
+            // Save this as the last accessed page for next time
+            last_accessed_pages[process_index] = page_number;
+
             uint64_t va = page_number * page_size_bytes;
             bool is_write = access_dist(gen) == 1;
 
@@ -742,11 +777,159 @@ int main()
 
     VirtualMemorySimulator simulator("bin");
 
+    std::string command;
+    bool should_simulate = false;
+
+    // Check for a special "ready.flag" file that the UI will create when confirming processes
+    std::string ready_flag_path = "bin/ready.flag";
+
+    // Add a timeout for waiting for configuration files
+    auto start_time = std::chrono::steady_clock::now();
+    const int MAX_WAIT_TIME_SEC = 60;
+
+    // Wait for user input from the UI (via file monitoring)
+    while (!should_simulate)
+    {
+        // Check for timeout
+        auto current_time = std::chrono::steady_clock::now();
+        auto elapsed_time = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
+
+        if (elapsed_time > MAX_WAIT_TIME_SEC)
+        {
+            debug.open("debug.txt", std::ios::app);
+            debug << "Timeout waiting for processes. Creating default files.\n";
+            debug.close();
+
+            // Create default files if we're timing out
+            std::ofstream default_env("bin/environment.json");
+            if (default_env.is_open())
+            {
+                default_env << "{\"ram_size_gb\": 1, \"page_size_kb\": 4, \"tlb_size\": 16, \"tlb_enabled\": false, \"virtual_address_size\": \"16-bit\", \"rom_size\": \"32 GB\", \"swap_percent\": 0, \"allocation_type\": \"Contiguous\"}" << std::endl;
+                default_env.close();
+            }
+
+            std::ofstream default_proc("bin/processes.json");
+            if (default_proc.is_open())
+            {
+                default_proc << "[]" << std::endl;
+                default_proc.close();
+            }
+
+            // Exit without simulation - we'll wait for user to explicitly start it
+            return 0;
+        }
+
+        // First check for the ready flag
+        if (std::ifstream(ready_flag_path).good())
+        {
+            should_simulate = true;
+            debug.open("debug.txt", std::ios::app);
+            debug << "Detected ready flag, starting simulation...\n";
+            debug.close();
+
+            // Remove the flag so we don't detect it again later
+            std::remove(ready_flag_path.c_str());
+            continue;
+        }
+
+        // Also check for non-empty process file as a fallback
+        try
+        {
+            std::ifstream env_file("bin/environment.json");
+            std::ifstream proc_file("bin/processes.json");
+
+            if (env_file.is_open() && proc_file.is_open())
+            {
+                // Check if there are processes defined in processes.json
+                json proc_settings;
+                proc_file >> proc_settings;
+
+                if (proc_settings.is_array() && !proc_settings.empty())
+                {
+                    should_simulate = true;
+                    debug.open("debug.txt", std::ios::app);
+                    debug << "Detected processes in configuration, starting simulation...\n";
+                    debug.close();
+                }
+            }
+        }
+        catch (const std::exception &e)
+        {
+            // Just wait for valid files
+        }
+
+        // Sleep to reduce CPU usage while waiting
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
     try
     {
         if (simulator.load_settings())
         {
-            simulator.simulate();
+            // Add simulation timeout
+            auto sim_start_time = std::chrono::steady_clock::now();
+            const int MAX_SIMULATION_TIME_SEC = 60; // 1 minute max for simulation
+                                                    // Set a hard time limit for simulation execution
+            auto start_time = std::chrono::steady_clock::now();
+
+            // Run with timeout monitoring
+            bool timed_out = false;
+
+            // Run simulation with periodic timeout checks
+            std::ofstream status_log("debug.txt", std::ios::app);
+            status_log << "Starting simulation with " << MAX_SIMULATION_TIME_SEC << " second timeout\n";
+            status_log.close();
+
+            // Create a simple thread status flag
+            bool simulation_running = true;
+
+            std::thread simulation_thread([&simulator, &simulation_running]()
+                                          {
+                try {
+                    simulator.simulate();
+                    simulation_running = false;
+                } catch (const std::exception& e) {
+                    std::ofstream error_log("debug.txt", std::ios::app);
+                    error_log << "Error in simulation thread: " << e.what() << std::endl;
+                    error_log.close();
+                    simulation_running = false;
+                } });
+
+            // Detach the thread so we don't have to wait for it if it gets stuck
+            simulation_thread.detach();
+
+            // Monitor the simulation with timeout
+            while (simulation_running)
+            {
+                auto current_time = std::chrono::steady_clock::now();
+                auto elapsed_time = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
+
+                if (elapsed_time > MAX_SIMULATION_TIME_SEC)
+                {
+                    std::ofstream timeout_log("debug.txt", std::ios::app);
+                    timeout_log << "Simulation timeout after " << MAX_SIMULATION_TIME_SEC << " seconds\n";
+                    timeout_log.close();
+
+                    // Create a minimal results file to prevent UI from hanging
+                    json minimal_results;
+                    minimal_results["status"] = "timeout";
+                    minimal_results["message"] = "Simulation timed out after " + std::to_string(MAX_SIMULATION_TIME_SEC) + " seconds";
+                    simulator.save_results(minimal_results);
+
+                    timed_out = true;
+                    break;
+                }
+
+                // Check periodically
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
+
+            if (timed_out)
+            {
+                std::cerr << "Simulation timeout, exiting\n";
+                return 1;
+            }
+
+            // Simulation completed successfully
             json results = simulator.export_results();
             if (simulator.save_results(results))
             {

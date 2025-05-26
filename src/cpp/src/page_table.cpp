@@ -34,15 +34,21 @@ PageTable::PageTable(uint64_t num_pages, uint64_t page_size_bytes, int entry_siz
           << "  Entry size: " << entry_size_ << " bytes\n"
           << "  Entries per table: " << entries_per_table_ << "\n"
           << "  Bits per level: " << bits_per_level_ << "\n"
-          << "  Number of levels: " << levels_ << "\n";
-
-    // Calculate total entries needed at each level
+          << "  Number of levels: " << levels_ << "\n"; // Calculate total entries needed at each level
     uint64_t total_entries = num_pages_;
     std::vector<uint64_t> entries_at_level(levels_);
     for (int i = levels_ - 1; i >= 0; --i)
     {
         entries_at_level[i] = (total_entries + entries_per_table_ - 1) / entries_per_table_;
         total_entries = entries_at_level[i];
+
+        // Limit tables per level to prevent excessive memory usage
+        const uint64_t MAX_TABLES_PER_LEVEL = 4096; // Reasonable upper limit
+        if (entries_at_level[i] > MAX_TABLES_PER_LEVEL)
+        {
+            entries_at_level[i] = MAX_TABLES_PER_LEVEL;
+            debug << "Warning: Limited level " << (i + 1) << " to " << MAX_TABLES_PER_LEVEL << " tables\n";
+        }
     }
 
     debug << "Table structure:\n";
@@ -76,8 +82,20 @@ int PageTable::calculate_levels()
 {
     int offset_bits = static_cast<int>(log2(page_size_bytes_));
     int index_bits = static_cast<int>(log2(num_pages_));
+
+    // More conservative approach to level calculation
+    // Avoid excessive levels for large address spaces
+    if (num_pages_ > 1048576)
+    {             // More than 1M pages
+        return 2; // Use 2 levels for very large spaces
+    }
+    else if (num_pages_ > 4096)
+    { // More than 4K pages
+        return std::min(2, static_cast<int>(ceil(static_cast<double>(index_bits) / bits_per_level_)));
+    }
+
     int levels = std::max(1, static_cast<int>(ceil(static_cast<double>(index_bits) / bits_per_level_)));
-    return std::min(levels, 4);
+    return std::min(levels, 2); // Cap at 2 levels max to avoid excessive memory usage
 }
 
 void PageTable::initialize_page_tables()
