@@ -168,12 +168,15 @@ class VirtualMemoryUI:
 
         self.process_frame_container = ctk.CTkFrame(self.outer_frame)
         self.process_frame_container.pack(fill="both", expand=True)
+          # Create a scrollable results frame in the results tab
+        self.results_scrollable_frame = ctk.CTkScrollableFrame(self.results_tab)
+        self.results_scrollable_frame.pack(padx=10, pady=10, fill="both", expand=True)
         
-        # Create the results frame in the results tab
-        self.results_frame = ctk.CTkFrame(self.results_tab)
-        self.results_frame.pack(padx=10, pady=10, fill="both", expand=True)
+        # Create the results frame inside the scrollable frame
+        self.results_frame = ctk.CTkFrame(self.results_scrollable_frame)
+        self.results_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Initialize the chart viewer for the results tab
+        # Initialize the chart viewer for the results frame
         self.chart_viewer = ChartViewer(self.results_frame)
 
         self.process_container = ctk.CTkFrame(self.process_frame_container, fg_color="transparent")

@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <iomanip>
+#include <algorithm>
 #include <direct.h>
 #include "../include/virtual_memory_simulator.h"
 
@@ -159,6 +160,7 @@ bool VirtualMemorySimulator::save_results(const json &results)
 json VirtualMemorySimulator::export_results()
 {
     json result;
+    // Static statistics
     result["tlb_stats"]["hits"] = tlb_hits;
     result["tlb_stats"]["misses"] = tlb_misses;
     result["tlb_stats"]["hit_rate"] = tlb_hit_rate;
@@ -166,6 +168,28 @@ json VirtualMemorySimulator::export_results()
     result["tlb_stats"]["total_misses"] = total_misses;
     result["page_faults"] = page_faults;
     result["total_faults"] = total_faults;
+
+    // Time-based metrics
+    if (!tlb_hits_over_time.empty())
+    {
+        result["time_series"]["tlb_hits"] = tlb_hits_over_time;
+    }
+    if (!tlb_misses_over_time.empty())
+    {
+        result["time_series"]["tlb_misses"] = tlb_misses_over_time;
+    }
+    if (!tlb_hit_rate_over_time.empty())
+    {
+        result["time_series"]["tlb_hit_rate"] = tlb_hit_rate_over_time;
+    }
+    if (!page_faults_over_time.empty())
+    {
+        result["time_series"]["page_faults"] = page_faults_over_time;
+    }
+    if (!ram_frames_used_over_time.empty())
+    {
+        result["time_series"]["ram_usage"] = ram_frames_used_over_time;
+    }
 
     return result;
 }
@@ -337,7 +361,6 @@ void VirtualMemorySimulator::simulate()
         last_accessed_pages.push_back(0); // Initialize with first page
         max_pages.push_back(max_page);
     }
-
     int simulation_duration = 100;
     for (int t = 0; t < simulation_duration; ++t)
     {
@@ -346,7 +369,12 @@ void VirtualMemorySimulator::simulate()
             std::cout << "Simulation progress: " << (t * 100 / simulation_duration) << "%\n";
             debug_file << "\n=== Time step " << t << " ===\n";
             debug_file.flush();
-        } // Iterate through active processes
+        }
+
+        // Record time series data at each time step
+        track_time_series_data(t);
+
+        // Iterate through active processes
         int process_index = 0;
         for (const auto &p : processes)
         {
@@ -573,12 +601,88 @@ void VirtualMemorySimulator::simulate()
     debug_file.close();
 }
 
+void VirtualMemorySimulator::track_time_series_data(int time_step)
+{
+    // Make sure the vectors are set up to hold data for each time step
+    if (time_step == 0)
+    {
+        // Initialize time series data containers for each process
+        tlb_hits_over_time.clear();
+        tlb_misses_over_time.clear();
+        tlb_hit_rate_over_time.clear();
+        page_faults_over_time.clear();
+        ram_frames_used_over_time.clear();
+
+        for (const auto &p : processes)
+        {
+            if (p.is_process_stop)
+                continue;
+
+            int pid = std::stoi(p.id);
+
+            // Initialize vectors for each process
+            tlb_hits_over_time.push_back(std::vector<std::pair<int, int>>());
+            tlb_misses_over_time.push_back(std::vector<std::pair<int, int>>());
+            tlb_hit_rate_over_time.push_back(std::vector<std::pair<int, double>>());
+            page_faults_over_time.push_back(std::vector<std::pair<int, int>>());
+        }
+    }
+
+    // Record current state in time series data
+    int process_idx = 0;
+    for (const auto &p : processes)
+    {
+        if (p.is_process_stop)
+            continue;
+
+        int pid = std::stoi(p.id);
+
+        // Find current stats for this process
+        auto hits_it = std::find_if(tlb_hits.begin(), tlb_hits.end(),
+                                    [pid](const auto &pair)
+                                    { return pair.first == pid; });
+        auto misses_it = std::find_if(tlb_misses.begin(), tlb_misses.end(),
+                                      [pid](const auto &pair)
+                                      { return pair.first == pid; });
+        auto rate_it = std::find_if(tlb_hit_rate.begin(), tlb_hit_rate.end(),
+                                    [pid](const auto &pair)
+                                    { return pair.first == pid; });
+        auto faults_it = std::find_if(page_faults.begin(), page_faults.end(),
+                                      [pid](const auto &pair)
+                                      { return pair.first == pid; });
+
+        // Record data if found
+        if (hits_it != tlb_hits.end())
+        {
+            tlb_hits_over_time[process_idx].push_back({time_step, hits_it->second});
+        }
+        if (misses_it != tlb_misses.end())
+        {
+            tlb_misses_over_time[process_idx].push_back({time_step, misses_it->second});
+        }
+        if (rate_it != tlb_hit_rate.end())
+        {
+            tlb_hit_rate_over_time[process_idx].push_back({time_step, rate_it->second});
+        }
+        if (faults_it != page_faults.end())
+        {
+            page_faults_over_time[process_idx].push_back({time_step, faults_it->second});
+        }
+
+        process_idx++;
+    }
+
+    // Calculate RAM usage (number of used frames)
+    int total_frames = ram_size_bytes / page_size_bytes;
+    int used_frames = total_frames - available_frames.size();
+    ram_frames_used_over_time.push_back({time_step, used_frames});
+}
+
 void VirtualMemorySimulator::lookup(const std::string &process_id, uint64_t page_number)
 {
     std::ofstream debug("debug.txt", std::ios::app);
     debug << "\n=== Page Table Lookup ===\n";
     debug << "Process: " << process_id << ", Page Number: " << page_number << "\n";
-
     auto it = page_tables.find(process_id);
     if (it != page_tables.end() && it->second.flag == 1)
     {
