@@ -67,6 +67,15 @@ private:
     std::string rom_size;
     int swap_percent;
     std::string allocation_type;
+
+    // Time series data for visualization
+    std::vector<std::vector<std::pair<int, int>>> tlb_hits_over_time;
+    std::vector<std::vector<std::pair<int, int>>> tlb_misses_over_time;
+    std::vector<std::vector<std::pair<int, double>>> tlb_hit_rate_over_time;
+    std::vector<std::vector<std::pair<int, int>>> page_faults_over_time;
+    std::vector<std::pair<int, int>> ram_frames_used_over_time;
+
+    // Summary data
     std::vector<std::pair<int, int>> tlb_hits;
     std::vector<std::pair<int, int>> tlb_misses;
     std::vector<std::pair<int, double>> tlb_hit_rate;
@@ -84,6 +93,7 @@ private:
     bool initialize_simulation();
     bool handle_process(const Process &process, uint64_t virtual_address, std::mt19937 &gen, std::ofstream &debug_file);
     void update_statistics(const std::string &pid, bool tlb_hit);
+    void track_time_series_data(int time_step);
     void print_statistics(int time_step, std::ofstream &debug_file);
     void cleanup_process(const std::string &pid);
     bool should_abort_simulation(const std::chrono::steady_clock::time_point &start_time,

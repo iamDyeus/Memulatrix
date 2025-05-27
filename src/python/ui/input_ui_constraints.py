@@ -10,33 +10,121 @@ class CustomMessageBox(ctk.CTkToplevel):
     def __init__(self, parent, title, message, options):
         super().__init__(parent)
         self.title(title)
-        self.geometry("500x400")
+        self.geometry("600x450")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
+        
+        # Center the window
+        self.center_window()
 
         self.result = None
+        
+        # Modern colors
+        self.colors = {
+            'primary': '#2563eb',
+            'success': '#059669', 
+            'warning': '#d97706',
+            'danger': '#dc2626',
+            'surface': '#f8fafc',
+            'card': '#ffffff'
+        }
 
-        message_frame = ctk.CTkFrame(self)
-        message_frame.pack(pady=10, padx=10, fill="both", expand=True)
+        # Main container
+        main_container = ctk.CTkFrame(self, fg_color=self.colors['surface'])
+        main_container.pack(fill="both", expand=True, padx=20, pady=20)
 
-        message_label = ctk.CTkLabel(message_frame, text=message, wraplength=450, font=("Arial", 12))
-        message_label.pack(pady=10, padx=10)
+        # Header with icon
+        header_frame = ctk.CTkFrame(main_container, fg_color=self.colors['primary'], corner_radius=15)
+        header_frame.pack(fill="x", pady=(0, 20))
+        
+        # Determine icon based on title
+        icon = self.get_icon_for_title(title)
+        
+        header_label = ctk.CTkLabel(
+            header_frame,
+            text=f"{icon} {title}",
+            font=("Segoe UI", 18, "bold"),
+            text_color="white"
+        )
+        header_label.pack(pady=20)
 
-        button_frame = ctk.CTkFrame(self, fg_color="transparent")
-        button_frame.pack(pady=10, fill="x", padx=10)
+        # Message container
+        message_container = ctk.CTkFrame(main_container, fg_color=self.colors['card'], corner_radius=15)
+        message_container.pack(fill="both", expand=True, pady=(0, 20))
+
+        # Scrollable message area
+        message_scroll = ctk.CTkScrollableFrame(message_container, fg_color="transparent")
+        message_scroll.pack(fill="both", expand=True, padx=20, pady=20)
+
+        message_label = ctk.CTkLabel(
+            message_scroll,
+            text=message,
+            wraplength=500,
+            font=("Segoe UI", 12),
+            justify="left",
+            text_color="#1e293b"
+        )
+        message_label.pack(pady=10, anchor="w")
+
+        # Button container
+        button_container = ctk.CTkFrame(main_container, fg_color="transparent")
+        button_container.pack(fill="x")
 
         self.buttons = []
-        for option in options:
+        button_frame = ctk.CTkFrame(button_container, fg_color="transparent")
+        button_frame.pack(expand=True)
+
+        for i, option in enumerate(options):
+            color = self.get_button_color(option, i, len(options))
             btn = ctk.CTkButton(
                 button_frame,
                 text=option,
                 command=lambda opt=option: self.on_button_click(opt),
-                width=100
+                width=120,
+                height=40,
+                corner_radius=10,
+                font=("Segoe UI", 12, "bold"),
+                fg_color=color,
+                hover_color=f"{color}dd"
             )
-            btn.pack(side="left", padx=15, pady=10)
+            btn.pack(side="left", padx=10, pady=10)
             self.buttons.append(btn)
-            btn.update()
+
+    def center_window(self):
+        """Center the window on screen"""
+        self.update_idletasks()
+        x = (self.winfo_screenwidth() // 2) - (600 // 2)
+        y = (self.winfo_screenheight() // 2) - (450 // 2)
+        self.geometry(f"600x450+{x}+{y}")
+
+    def get_icon_for_title(self, title):
+        """Get appropriate icon based on dialog title"""
+        title_lower = title.lower()
+        if "error" in title_lower:
+            return "❌"
+        elif "success" in title_lower:
+            return "✅"
+        elif "confirm" in title_lower:
+            return "❓"
+        elif "warning" in title_lower:
+            return "⚠️"
+        elif "simulation" in title_lower:
+            return "🚀"
+        else:
+            return "ℹ️"
+
+    def get_button_color(self, option, index, total):
+        """Get appropriate color for button based on option text"""
+        option_lower = option.lower()
+        if option_lower in ["ok", "yes", "confirm", "save"]:
+            return self.colors['success']
+        elif option_lower in ["cancel", "no", "close"]:
+            return self.colors['danger']
+        elif option_lower in ["maybe", "later"]:
+            return self.colors['warning']
+        else:
+            return self.colors['primary']
 
     def on_button_click(self, option):
         self.result = option
@@ -89,13 +177,13 @@ class LogicHandler:
             self.simulator_process = None
         if not self.simulator_process or self.simulator_process.poll() is not None:
             if not os.path.exists(self.simulator_path):
-                messagebox.showerror("Error", "Simulator executable not found")
+                CustomMessageBox(self.ui.app, "❌ Error", "Simulator executable not found", ["OK"])
                 return False
                 
             try:
                 self.simulator_process = subprocess.Popen([self.simulator_path])
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to start simulator: {str(e)}")
+                CustomMessageBox(self.ui.app, "❌ Error", f"Failed to start simulator: {str(e)}", ["OK"])
                 return False
         
         return True
@@ -136,7 +224,7 @@ class LogicHandler:
                 
             return True
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
+            CustomMessageBox(self.ui.app, "❌ Error", f"Failed to save settings: {str(e)}", ["OK"])
             return False    
         
     def load_processes_from_json(self):
@@ -150,7 +238,7 @@ class LogicHandler:
                             process_info = f"ID: {process['id']}, Name: {process['name']}, Size: {process['size_gb']}GB, Type: {process['type']}, VA: {process['virtual_address']}"
                             self.ui.add_process_to_list(process_info, process['id'], process['is_process_stop'])
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to load process data: {str(e)}")
+                CustomMessageBox(self.ui.app, "❌ Error", f"Failed to load process data: {str(e)}", ["OK"])
                 
     def send_to_cpp(self, force_new=False):
         # Make sure to save settings first
@@ -184,7 +272,7 @@ class LogicHandler:
                     try:
                         with open(results_path, 'r') as f:
                             results = json.load(f)
-                            dialog = CustomMessageBox(self.ui.app, "Success", "Simulation completed successfully.", ["OK"])
+                            dialog = CustomMessageBox(self.ui.app, "✅ Success", "Simulation completed successfully.", ["OK"])
                             dialog.get()
                             # Display the results in the UI
                             self.display_results(results_path)
@@ -197,12 +285,12 @@ class LogicHandler:
                     time.sleep(1)
                 attempt += 1
             
-            messagebox.showerror("Error", "Simulator did not generate valid results after multiple attempts")
+            CustomMessageBox(self.ui.app, "❌ Error", "Simulator did not generate valid results after multiple attempts", ["OK"])
             return False
 
         except Exception as e:
             print(f"Simulation error: {str(e)}")
-            messagebox.showerror("Error", f"Failed to process simulation: {str(e)}")
+            CustomMessageBox(self.ui.app, "❌ Error", f"Failed to process simulation: {str(e)}", ["OK"])
             return False
 
     def set_configuration(self):
@@ -218,34 +306,34 @@ class LogicHandler:
         }
 
         message = (
-            f"Environment Settings:\n\n"
-            f"RAM Size: {settings['ram_size']} GB\n"
-            f"Page Size: {settings['page_size']}\n"
-            f"TLB Size: {settings['tlb_size']}\n"
-            f"TLB Enabled: {settings['tlb_enabled']}\n"
-            f"Virtual Address Size: {settings['virtual_address_size']}\n"
-            f"ROM Size: {settings['rom_size']}\n"
-            f"Swap Size: {settings['swap_size']:.0f}%\n"
-            f"Allocation Type: {settings['allocation_type']}\n\n"
-            f"Click OK to confirm."
+            f"🔧 Environment Configuration Summary:\n\n"
+            f"💾 RAM Size: {settings['ram_size']} GB\n"
+            f"📄 Page Size: {settings['page_size']}\n"
+            f"⚡ TLB Size: {settings['tlb_size']}\n"
+            f"🔌 TLB Enabled: {'Yes' if settings['tlb_enabled'] else 'No'}\n"
+            f"🏠 Virtual Address Size: {settings['virtual_address_size']}\n"
+            f"💿 ROM Size: {settings['rom_size']}\n"
+            f"🔄 Swap Size: {settings['swap_size']:.0f}%\n"
+            f"📦 Allocation Type: {settings['allocation_type']}\n\n"
+            f"✅ Click OK to confirm and enable process management."
         )
 
-        dialog = CustomMessageBox(self.ui.app, "Confirm Environment Settings", message, ["OK", "Cancel"])
+        dialog = CustomMessageBox(self.ui.app, "❓ Confirm Environment Settings", message, ["OK", "Cancel"])
         if dialog.get() == "OK":
             if self.save_to_json():
                 self.enable_process_add_section()
-                self.ui.config_button.configure(text="Update Configuration")
-                dialog = CustomMessageBox(self.ui.app, "Success", "Environment settings saved.", ["OK"])
+                self.ui.config_button.configure(text="🔄 Update Configuration")
+                dialog = CustomMessageBox(self.ui.app, "✅ Success", "Environment settings saved successfully!\n\nYou can now add processes to the simulation.", ["OK"])
                 dialog.get()
 
     def confirm_processes(self):
         if not self.process_data:
-            messagebox.showerror("Error", "No processes added yet")
+            CustomMessageBox(self.ui.app, "⚠️ Warning", "No processes have been added yet.\n\nPlease add at least one process before starting the simulation.", ["OK"])
             return
         
         # First, save the configuration
         if not self.save_to_json():
-            messagebox.showerror("Error", "Failed to save configuration")
+            CustomMessageBox(self.ui.app, "❌ Error", "Failed to save configuration", ["OK"])
             return
         
         # Create a ready flag file to tell the simulator to start
@@ -258,11 +346,11 @@ class LogicHandler:
             
         # Then start the simulator
         if not self.start_simulator(force_new=True):
-            messagebox.showerror("Error", "Failed to start simulator")
+            CustomMessageBox(self.ui.app, "❌ Error", "Failed to start simulator", ["OK"])
             return
             
-        dialog = CustomMessageBox(self.ui.app, "Simulation Started", 
-                                "Simulation has been started. Please wait for results...", ["OK"])
+        dialog = CustomMessageBox(self.ui.app, "🚀 Simulation Started", 
+                                "🔄 Simulation is now running...\n\nPlease wait while the virtual memory simulator processes your configuration and active processes.\n\nThis may take a few moments.", ["OK"])
         dialog.get()
         
         # Wait for the simulator to generate results
@@ -291,8 +379,8 @@ class LogicHandler:
                     try:
                         with open(results_path, 'r') as f:
                             results = json.load(f)
-                            dialog = CustomMessageBox(self.ui.app, "Success", 
-                                                    "Simulation completed successfully.", ["OK"])
+                            dialog = CustomMessageBox(self.ui.app, "✅ Success", 
+                                                    "🎉 Simulation completed successfully!\n\nResults are now available in the 'Simulation Results' tab.\n\nYou can view detailed charts and performance metrics.", ["OK"])
                             dialog.get()
                             # Display the results in the UI
                             self.display_results(results_path)
@@ -304,11 +392,11 @@ class LogicHandler:
                     print(f"Results file not found (attempt {attempt})")
                     time.sleep(1)
                     
-            messagebox.showerror("Error", "Simulator did not generate valid results after multiple attempts")
+            CustomMessageBox(self.ui.app, "❌ Error", "Simulator did not generate valid results after multiple attempts.\n\nPlease check your configuration and try again.", ["OK"])
             
         except Exception as e:
             print(f"Simulation error: {str(e)}")
-            messagebox.showerror("Error", f"Error during simulation: {str(e)}")
+            CustomMessageBox(self.ui.app, "❌ Error", f"Error during simulation:\n\n{str(e)}", ["OK"])
 
     def toggle_system_dropdown(self, value):
         self.ui.toggle_system_dropdown(value)
@@ -363,7 +451,16 @@ class LogicHandler:
         system_process = self.ui.system_process_var.get() if process_type == "System" else None
 
         if process_name in ["", "e.g., Process1"] or process_size in ["", "e.g., 1"]:
-            CustomMessageBox(self.ui.app, "Error", "All required fields must be filled!", ["OK"])
+            CustomMessageBox(self.ui.app, "⚠️ Validation Error", "📝 All required fields must be filled!\n\nPlease provide:\n• Process name\n• Process size (in GB)", ["OK"])
+            return
+
+        try:
+            size_value = float(process_size)
+            if size_value <= 0:
+                CustomMessageBox(self.ui.app, "⚠️ Validation Error", "📏 Process size must be greater than 0 GB.", ["OK"])
+                return
+        except ValueError:
+            CustomMessageBox(self.ui.app, "⚠️ Validation Error", "📏 Process size must be a valid number.", ["OK"])
             return
 
         process_id = str(self.next_process_id)
@@ -376,7 +473,7 @@ class LogicHandler:
         process_entry = {
             "id": process_id,
             "name": display_name,
-            "size_gb": int(process_size),
+            "size_gb": float(process_size),
             "type": process_type,
             "has_priority": False,
             "is_process_stop": False,
@@ -387,10 +484,12 @@ class LogicHandler:
         self.ui.add_process_to_list(process_info, process_id, False)
         self.save_to_json()
 
+        # Clear and reset form
         self.ui.process_name_entry.delete(0, "end")
-        self.ui.process_name_entry.insert(0, "e.g., Process1")
         self.ui.process_size_entry.delete(0, "end")
-        self.ui.process_size_entry.insert(0, "e.g., 1")
+        
+        # Show success message
+        CustomMessageBox(self.ui.app, "✅ Success", f"🎉 Process '{display_name}' added successfully!\n\nProcess ID: {process_id}\nSize: {process_size} GB\nType: {process_type}", ["OK"])
 
     def find_process_index(self, process_id):
         for idx, proc in enumerate(self.process_data):
@@ -409,9 +508,15 @@ class LogicHandler:
             if pid == process_id:
                 proc = self.process_data[idx]
                 is_stopped = proc["is_process_stop"]
+                
+                # Update button text and color
+                action_text = "▶️ Resume" if is_stopped else "⏸️ Stop"
+                action_color = self.ui.colors['success'] if is_stopped else self.ui.colors['warning']
+                
                 frame.button.configure(
-                    text="Resume" if is_stopped else "Stop",
-                    fg_color="#66CC66" if is_stopped else "#0e19e6",
+                    text=action_text,
+                    fg_color=action_color,
+                    hover_color=f"{action_color}dd",
                     command=lambda pid=process_id: self.resume_process(frame, pid) if is_stopped else self.stop_process(frame, pid)
                 )
                 found = True
@@ -422,13 +527,17 @@ class LogicHandler:
     def resume_process(self, process_frame, process_id):
         idx = self.find_process_index(process_id)
         if idx == -1:
-            CustomMessageBox(self.ui.app, "Error", f"Process with ID {process_id} not found.", ["OK"])
+            CustomMessageBox(self.ui.app, "❌ Error", f"Process with ID {process_id} not found.", ["OK"])
             return
 
-        self.process_data[idx]["is_process_stop"] = False
-        self.update_process_ui(process_id)
-        self.reorder_process_list()
-        self.send_to_cpp()
+        process_name = self.process_data[idx]["name"]
+        dialog = CustomMessageBox(self.ui.app, "❓ Confirm Resume", f"▶️ Resume process '{process_name}'?\n\nThis will restart the process in the simulation.", ["Resume", "Cancel"])
+        
+        if dialog.get() == "Resume":
+            self.process_data[idx]["is_process_stop"] = False
+            self.update_process_ui(process_id)
+            self.reorder_process_list()
+            self.send_to_cpp()
 
     def reorder_process_list(self):
         running = sorted(
@@ -450,8 +559,13 @@ class LogicHandler:
             self.ui.no_processes_label.destroy()
 
         if not self.process_data:
-            self.ui.no_processes_label = ctk.CTkLabel(self.ui.process_container, text="No active processes", font=("Arial", 12, "italic"))
-            self.ui.no_processes_label.pack(pady=20)
+            self.ui.no_processes_label = ctk.CTkLabel(
+                self.ui.process_container,
+                text="🔍 No active processes\nAdd a process to get started",
+                font=("Segoe UI", 14),
+                text_color=self.ui.colors['text_secondary']
+            )
+            self.ui.no_processes_label.pack(pady=50)
             return
 
         for proc in self.process_data:
@@ -463,12 +577,13 @@ class LogicHandler:
     def remove_process(self, process_frame, process_id):
         idx = self.find_process_index(process_id)
         if idx == -1:
-            CustomMessageBox(self.ui.app, "Error", f"Process with ID {process_id} not found.", ["OK"])
+            CustomMessageBox(self.ui.app, "❌ Error", f"Process with ID {process_id} not found.", ["OK"])
             return
 
         proc = self.process_data[idx]
-        dialog = CustomMessageBox(self.ui.app, "Confirm Removal", f"Are you sure you want to remove process {proc['name']} (ID: {proc['id']})?", ["OK", "Cancel"])
-        if dialog.get() == "OK":
+        dialog = CustomMessageBox(self.ui.app, "❓ Confirm Removal", f"🗑️ Remove process '{proc['name']}'?\n\nProcess ID: {proc['id']}\nSize: {proc['size_gb']} GB\n\nThis action cannot be undone.", ["Remove", "Cancel"])
+        
+        if dialog.get() == "Remove":
             self.process_data.pop(idx)
             self.ui.remove_process(process_frame, process_id)
             self.reorder_process_list()
@@ -478,13 +593,17 @@ class LogicHandler:
     def stop_process(self, process_frame, process_id):
         idx = self.find_process_index(process_id)
         if idx == -1:
-            CustomMessageBox(self.ui.app, "Error", f"Process with ID {process_id} not found.", ["OK"])
+            CustomMessageBox(self.ui.app, "❌ Error", f"Process with ID {process_id} not found.", ["OK"])
             return
 
-        self.process_data[idx]["is_process_stop"] = True
-        self.update_process_ui(process_id)
-        self.reorder_process_list()
-        self.send_to_cpp()
+        process_name = self.process_data[idx]["name"]
+        dialog = CustomMessageBox(self.ui.app, "❓ Confirm Stop", f"⏸️ Stop process '{process_name}'?\n\nThis will pause the process in the simulation.", ["Stop", "Cancel"])
+        
+        if dialog.get() == "Stop":
+            self.process_data[idx]["is_process_stop"] = True
+            self.update_process_ui(process_id)
+            self.reorder_process_list()
+            self.send_to_cpp()
 
     def enable_process_add_section(self):
         self.ui.process_name_entry.configure(state="normal")
@@ -501,11 +620,11 @@ class LogicHandler:
     def display_results(self, results_path):
         """Display simulation results in charts"""
         # Switch to the Results tab
-        self.ui.main_tabview.set("Results")
+        self.ui.main_tabview.set("📊 Simulation Results")
         
         # Create the charts using the ChartViewer
         if self.ui.chart_viewer.create_charts(results_path):
             print("Charts created successfully")
         else:
             print("Failed to create charts")
-            messagebox.showerror("Error", "Failed to display simulation results charts")
+            CustomMessageBox(self.ui.app, "❌ Error", "Failed to display simulation results charts.\n\nPlease check the simulation output and try again.", ["OK"])
