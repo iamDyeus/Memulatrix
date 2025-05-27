@@ -11,57 +11,57 @@ class ChartViewer:
         self.charts = {}
     
     def create_charts(self, results_path):
-            """Create all simulation result charts"""
-            if not os.path.exists(results_path):
-                return False
-            try:
-                with open(results_path, 'r') as f:
-                    results = json.load(f)
-                
-                # First destroy any existing charts properly
-                self.destroy_charts()
-                  # Create a tab view for the charts with larger dimensions
-                self.tab_view = ctk.CTkTabview(self.parent)
-                self.tab_view.pack(fill="both", expand=True, padx=10, pady=10)
-                
-                # Configure the tab view to have a minimum height
-                self.tab_view.configure(height=800)
-                  # Create tabs for each chart with scrollable frames
-                self.combined_tab = self.tab_view.add("Combined Metrics")
-                self.tlb_hits_tab = self.tab_view.add("TLB Hits")
-                self.tlb_rate_tab = self.tab_view.add("TLB Hit Rate")
-                self.page_faults_tab = self.tab_view.add("Page Faults")
-                self.ram_usage_tab = self.tab_view.add("RAM Usage")
-                  # Create scrollable frames for each tab with minimum heights
-                self.combined_scroll = ctk.CTkScrollableFrame(self.combined_tab, height=600)
-                self.combined_scroll.pack(fill="both", expand=True, padx=5, pady=5)
-                
-                self.tlb_hits_scroll = ctk.CTkScrollableFrame(self.tlb_hits_tab, height=500)
-                self.tlb_hits_scroll.pack(fill="both", expand=True, padx=5, pady=5)
-                
-                self.tlb_rate_scroll = ctk.CTkScrollableFrame(self.tlb_rate_tab, height=500)
-                self.tlb_rate_scroll.pack(fill="both", expand=True, padx=5, pady=5)
-                
-                self.page_faults_scroll = ctk.CTkScrollableFrame(self.page_faults_tab, height=500)
-                self.page_faults_scroll.pack(fill="both", expand=True, padx=5, pady=5)
-                
-                self.ram_usage_scroll = ctk.CTkScrollableFrame(self.ram_usage_tab, height=500)
-                self.ram_usage_scroll.pack(fill="both", expand=True, padx=5, pady=5)
-                  # Create the charts in scrollable frames
-                self.create_combined_metrics_chart(self.combined_scroll, results)
-                self.create_tlb_hits_chart(self.tlb_hits_scroll, results)
-                self.create_tlb_hit_rate_chart(self.tlb_rate_scroll, results)
-                self.create_page_faults_chart(self.page_faults_scroll, results)
-                self.create_ram_usage_chart(self.ram_usage_scroll, results)
-                
-                return True
-            except Exception as e:
-                print(f"Error creating charts: {e}")
-                return False
+        """Create all simulation result charts"""
+        if not os.path.exists(results_path):
+            return False
+        try:
+            with open(results_path, 'r') as f:
+                results = json.load(f)
+            
+            # First destroy any existing charts properly
+            self.destroy_charts()
+            # Create a tab view for the charts with larger dimensions
+            self.tab_view = ctk.CTkTabview(self.parent)
+            self.tab_view.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # Configure the tab view to have a minimum height
+            self.tab_view.configure(height=800)
+            # Create tabs for each chart with scrollable frames
+            self.combined_tab = self.tab_view.add("Combined Metrics")
+            self.tlb_hits_tab = self.tab_view.add("TLB Hits")
+            self.tlb_rate_tab = self.tab_view.add("TLB Hit Rate")
+            self.page_faults_tab = self.tab_view.add("Page Faults")
+            self.ram_usage_tab = self.tab_view.add("RAM Usage")
+            # Create scrollable frames for each tab with minimum heights
+            self.combined_scroll = ctk.CTkScrollableFrame(self.combined_tab, height=600)
+            self.combined_scroll.pack(fill="both", expand=True, padx=5, pady=5)
+            
+            self.tlb_hits_scroll = ctk.CTkScrollableFrame(self.tlb_hits_tab, height=500)
+            self.tlb_hits_scroll.pack(fill="both", expand=True, padx=5, pady=5)
+            
+            self.tlb_rate_scroll = ctk.CTkScrollableFrame(self.tlb_rate_tab, height=500)
+            self.tlb_rate_scroll.pack(fill="both", expand=True, padx=5, pady=5)
+            
+            self.page_faults_scroll = ctk.CTkScrollableFrame(self.page_faults_tab, height=500)
+            self.page_faults_scroll.pack(fill="both", expand=True, padx=5, pady=5)
+            
+            self.ram_usage_scroll = ctk.CTkScrollableFrame(self.ram_usage_tab, height=500)
+            self.ram_usage_scroll.pack(fill="both", expand=True, padx=5, pady=5)
+            # Create the charts in scrollable frames
+            self.create_combined_metrics_chart(self.combined_scroll, results)
+            self.create_tlb_hits_chart(self.tlb_hits_scroll, results)
+            self.create_tlb_hit_rate_chart(self.tlb_rate_scroll, results)
+            self.create_page_faults_chart(self.page_faults_scroll, results)
+            self.create_ram_usage_chart(self.ram_usage_scroll, results)
+            
+            return True
+        except Exception as e:
+            print(f"Error creating charts: {e}")
+            return False
             
     def create_combined_metrics_chart(self, parent, results):
         """Create chart showing multiple metrics over time"""
-        fig, ax1 = plt.subplots(figsize=(10, 8), dpi=100)
+        fig, ax1 = plt.subplots(figsize=(6, 4), dpi=100)
         
         # Set up multiple y-axes for different metrics
         ax2 = ax1.twinx()  # Create a second y-axis sharing the same x-axis
@@ -181,7 +181,8 @@ class ChartViewer:
                   ncol=2, fancybox=True, shadow=True)
         
         fig.tight_layout()
-        plt.subplots_adjust(bottom=0.2)        # Embed in Tkinter with proper sizing
+        plt.subplots_adjust(bottom=0.2)
+        # Embed in Tkinter with proper sizing
         canvas = FigureCanvasTkAgg(fig, master=parent)
         canvas_widget = canvas.get_tk_widget()
         canvas_widget.pack(fill="both", expand=True, padx=10, pady=10)
@@ -195,7 +196,7 @@ class ChartViewer:
         if 'tlb_stats' not in results or 'hits' not in results['tlb_stats']:
             return
         
-        fig, ax = plt.subplots(figsize=(9, 6), dpi=100)
+        fig, ax = plt.subplots(figsize=(7, 4.5), dpi=100)
         
         # Check if we have time series data
         if 'time_series' in results and 'tlb_hits' in results['time_series']:
@@ -219,7 +220,8 @@ class ChartViewer:
         ax.set_xlabel('Time Steps')
         ax.set_ylabel('Number of TLB Hits')
         ax.grid(True, linestyle='--', alpha=0.7)
-        ax.legend()        # Embed in Tkinter with proper sizing
+        ax.legend()
+        # Embed in Tkinter with proper sizing
         canvas = FigureCanvasTkAgg(fig, master=parent)
         canvas_widget = canvas.get_tk_widget()
         canvas_widget.pack(fill="both", expand=True, padx=10, pady=10)
@@ -233,7 +235,7 @@ class ChartViewer:
         if 'tlb_stats' not in results or 'hit_rate' not in results['tlb_stats']:
             return
         
-        fig, ax = plt.subplots(figsize=(9, 6), dpi=100)
+        fig, ax = plt.subplots(figsize=(7, 4.5), dpi=100)
         
         # Process the data
         tlb_hit_rate_data = results['tlb_stats']['hit_rate']
@@ -249,7 +251,8 @@ class ChartViewer:
         ax.set_ylabel('Hit Rate (%)')
         ax.grid(True, linestyle='--', alpha=0.7)
         ax.set_ylim(0, 100)
-        ax.legend()        # Embed in Tkinter with proper sizing
+        ax.legend()
+        # Embed in Tkinter with proper sizing
         canvas = FigureCanvasTkAgg(fig, master=parent)
         canvas_widget = canvas.get_tk_widget()
         canvas_widget.pack(fill="both", expand=True, padx=10, pady=10)
@@ -263,7 +266,7 @@ class ChartViewer:
         if 'page_faults' not in results:
             return
         
-        fig, ax = plt.subplots(figsize=(9, 6), dpi=100)
+        fig, ax = plt.subplots(figsize=(7, 4.5), dpi=100)
         
         # Process the data
         page_faults_data = results['page_faults']
@@ -289,7 +292,8 @@ class ChartViewer:
         ax.set_xlabel('Time Steps')
         ax.set_ylabel('Number of Page Faults')
         ax.grid(True, linestyle='--', alpha=0.7)
-        ax.legend()        # Embed in Tkinter with proper sizing
+        ax.legend()
+        # Embed in Tkinter with proper sizing
         canvas = FigureCanvasTkAgg(fig, master=parent)
         canvas_widget = canvas.get_tk_widget()
         canvas_widget.pack(fill="both", expand=True, padx=10, pady=10)
@@ -302,7 +306,7 @@ class ChartViewer:
         # This is an estimation since we don't have direct RAM occupancy data
         # We'll use the process data and page faults to simulate RAM usage
         
-        fig, ax = plt.subplots(figsize=(9, 6), dpi=100)
+        fig, ax = plt.subplots(figsize=(7, 4.5), dpi=100)
         
         # We can use the page faults data to simulate RAM occupancy
         # Each page fault would likely correspond to loading a page into RAM
@@ -338,7 +342,8 @@ class ChartViewer:
             ax.set_ylabel('RAM Usage (%)')
             ax.grid(True, linestyle='--', alpha=0.7)
             ax.set_ylim(0, 100)
-          # Embed in Tkinter with proper sizing
+        
+        # Embed in Tkinter with proper sizing
         canvas = FigureCanvasTkAgg(fig, master=parent)
         canvas_widget = canvas.get_tk_widget()
         canvas_widget.pack(fill="both", expand=True, padx=10, pady=10)
